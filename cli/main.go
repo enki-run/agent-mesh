@@ -139,38 +139,38 @@ func cmdSend(url, token string, args []string) {
 		fmt.Fprintln(os.Stderr, "mesh-cli send: Empfaenger fehlt.")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "  Usage:")
-		fmt.Fprintln(os.Stderr, "    mesh-cli send <agent> <type> <nachricht>")
-		fmt.Fprintln(os.Stderr, "    mesh-cli send <agent> <type> - < datei.txt")
-		fmt.Fprintln(os.Stderr, "    echo 'text' | mesh-cli send <agent> <type>")
+		fmt.Fprintln(os.Stderr, `    mesh-cli send <agent> "nachricht"`)
+		fmt.Fprintln(os.Stderr, `    echo "text" | mesh-cli send <agent>`)
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "  Beispiele:")
-		fmt.Fprintln(os.Stderr, `    mesh-cli send ops info "Server neugestartet"`)
-		fmt.Fprintln(os.Stderr, `    mesh-cli send ops incident "DB nicht erreichbar"`)
-		fmt.Fprintln(os.Stderr, `    docker logs app 2>&1 | mesh-cli send ops incident`)
-		fmt.Fprintln(os.Stderr, `    mesh-cli send broadcast info "Wartung um 22 Uhr"`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli send ops "Server neugestartet"`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli send ops "DB nicht erreichbar" --type incident`)
+		fmt.Fprintln(os.Stderr, `    docker logs app 2>&1 | mesh-cli send ops --type incident`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli send broadcast "Wartung um 22 Uhr"`)
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "  Typen: info, question, incident, deploy_request, review_request, task_update")
+		fmt.Fprintln(os.Stderr, "  Typ ist optional (default: info)")
+		fmt.Fprintln(os.Stderr, "  Typen: info, question, incident, deploy_request, review_request, task_update, script")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "  Wer ist da?  mesh-cli status")
 		os.Exit(1)
 	}
 
-	if len(args) == 1 {
-		fmt.Fprintf(os.Stderr, "mesh-cli send %s: Nachrichtentyp fehlt.\n\n", args[0])
-		fmt.Fprintln(os.Stderr, "  Typen: info, question, incident, deploy_request, review_request, task_update")
-		fmt.Fprintf(os.Stderr, "  Beispiel: mesh-cli send %s info \"Deine Nachricht\"\n", args[0])
-		os.Exit(1)
-	}
-
 	to := args[0]
-	msgType := args[1]
+	msgType := "info"
 	context := "mesh-cli"
+	hostname, _ := os.Hostname()
+	if hostname != "" {
+		context = "mesh-cli@" + hostname
+	}
 	var payload string
 
-	// Parse optional flags first
+	// Parse flags and collect payload args
 	var payloadArgs []string
-	for i := 2; i < len(args); i++ {
-		if args[i] == "--context" && i+1 < len(args) {
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--type" && i+1 < len(args) {
+			msgType = args[i+1]
+			i++
+		} else if args[i] == "--context" && i+1 < len(args) {
 			context = args[i+1]
 			i++
 		} else {
@@ -202,11 +202,11 @@ func cmdSend(url, token string, args []string) {
 		}
 		payload = strings.TrimSpace(string(data))
 	} else {
-		fmt.Fprintf(os.Stderr, "mesh-cli send %s %s: Nachricht fehlt.\n\n", to, msgType)
+		fmt.Fprintf(os.Stderr, "mesh-cli send %s: Nachricht fehlt.\n\n", to)
 		fmt.Fprintln(os.Stderr, "  Drei Wege eine Nachricht zu senden:")
-		fmt.Fprintf(os.Stderr, "    mesh-cli send %s %s \"Dein Text hier\"\n", to, msgType)
-		fmt.Fprintf(os.Stderr, "    echo \"Dein Text\" | mesh-cli send %s %s\n", to, msgType)
-		fmt.Fprintf(os.Stderr, "    cat datei.txt | mesh-cli send %s %s\n", to, msgType)
+		fmt.Fprintf(os.Stderr, "    mesh-cli send %s \"Dein Text hier\"\n", to)
+		fmt.Fprintf(os.Stderr, "    echo \"Dein Text\" | mesh-cli send %s\n", to)
+		fmt.Fprintf(os.Stderr, "    cat datei.txt | mesh-cli send %s\n", to)
 		os.Exit(1)
 	}
 
@@ -437,27 +437,20 @@ func cmdHistory(url, token string, args []string) {
 }
 
 func cmdRegister(url, token string, args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "mesh-cli register: Rolle fehlt.")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "  Usage: mesh-cli register <rolle>")
-		fmt.Fprintln(os.Stderr, "  Beispiele:")
-		fmt.Fprintln(os.Stderr, "    mesh-cli register developer")
-		fmt.Fprintln(os.Stderr, `    mesh-cli register ops --capabilities "ssh,docker"`)
-		fmt.Fprintln(os.Stderr, `    mesh-cli register reviewer --working-on "Security Audit"`)
-		os.Exit(1)
-	}
-
+	hostname, _ := os.Hostname()
 	params := map[string]any{
-		"role": args[0],
+		"role":         "cli",
+		"capabilities": []string{"bash", "pipe", "ssh"},
+	}
+	if hostname != "" {
+		params["working_on"] = "mesh-cli@" + hostname
 	}
 
-	for i := 1; i < len(args); i++ {
+	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--capabilities":
 			if i+1 < len(args) {
-				caps := strings.Split(args[i+1], ",")
-				params["capabilities"] = caps
+				params["capabilities"] = strings.Split(args[i+1], ",")
 				i++
 			} else {
 				fatal("--capabilities braucht einen Wert, z.B. --capabilities ssh,docker")
@@ -467,13 +460,13 @@ func cmdRegister(url, token string, args []string) {
 				params["working_on"] = args[i+1]
 				i++
 			} else {
-				fatal("--working-on braucht einen Wert, z.B. --working-on \"Feature X\"")
+				fatal("--working-on braucht einen Wert, z.B. --working-on \"Debugging\"")
 			}
 		}
 	}
 
 	mcpCall(url, token, "mesh_register", params)
-	fmt.Printf("✓ Registriert als %s\n", args[0])
+	fmt.Printf("✓ Registriert als cli (%s)\n", hostname)
 }
 
 // ── MCP Client ──────────────────────────────────────────────────
@@ -660,36 +653,34 @@ func printUsage() {
 	fmt.Print(`mesh-cli — Agent Mesh Kommandozeile
 
 Befehle:
-  mesh-cli status                          Wer ist online?
-  mesh-cli send <agent> <typ> <nachricht>  Nachricht senden
-  mesh-cli receive                         Neue Nachrichten abholen
-  mesh-cli get <msg_id>                    Rohe Payload ausgeben (pipebar!)
-  mesh-cli reply <msg_id> <antwort>        Auf Nachricht antworten
-  mesh-cli history <msg_id>                Thread-Verlauf anzeigen
-  mesh-cli register <rolle>                Sich registrieren
+  mesh-cli status                        Wer ist online?
+  mesh-cli send <agent> "nachricht"      Nachricht senden (Typ: info)
+  mesh-cli receive                       Neue Nachrichten abholen
+  mesh-cli get <msg_id>                  Rohe Payload ausgeben (pipebar!)
+  mesh-cli reply <msg_id> "antwort"      Auf Nachricht antworten
+  mesh-cli history <msg_id>              Thread-Verlauf anzeigen
+  mesh-cli register                      Als CLI-Agent registrieren
 
 Nachrichten senden:
-  mesh-cli send ops info "Server laeuft"       Direkt als Argument
-  echo "logs" | mesh-cli send ops incident     Piped von stdin (auto)
-  cat datei.txt | mesh-cli send ops info       Datei-Inhalt senden
-  mesh-cli send broadcast info "An alle"       An alle Agents
+  mesh-cli send ops "Server laeuft"                   Direkt als Text
+  mesh-cli send ops "DB down" --type incident          Mit Typ
+  echo "logs" | mesh-cli send ops                      Piped (auto)
+  echo "logs" | mesh-cli send ops --type incident      Piped mit Typ
+  cat datei.txt | mesh-cli send ops                    Datei senden
+  mesh-cli send broadcast "Wartung um 22 Uhr"          An alle
 
-Nachrichtentypen:
-  info, question, incident, deploy_request, deploy_status,
-  review_request, review_result, task_update
+Scripts & Dateien:
+  mesh-cli get <msg_id> > script.sh      Payload als Datei speichern
+  mesh-cli get <msg_id> | bash           Script direkt ausfuehren
+  mesh-cli get <msg_id> | python3        Python-Script ausfuehren
 
 Optionen:
-  --token <t>    Token (oder: export MESH_TOKEN=bt_...)
-  --url <u>      Server-URL (default: mesh.enki.run)
-  --context <c>  Kontext fuer send (default: mesh-cli)
-  --limit <n>    Max Nachrichten fuer receive
-  --type <t>     Typ-Filter fuer receive
-
-Scripts & Dateien uebertragen:
-  mesh-cli get <msg_id> > script.sh        Payload als Datei speichern
-  mesh-cli get <msg_id> | bash             Script direkt ausfuehren
-  mesh-cli get <msg_id> | python3          Python-Script ausfuehren
-  cat runbook.md | mesh-cli send ops info  Datei an Agent senden
+  --token <t>     Token (oder: export MESH_TOKEN=bt_...)
+  --url <u>       Server-URL (default: mesh.enki.run)
+  --type <t>      Nachrichtentyp fuer send (default: info)
+  --context <c>   Kontext fuer send (default: mesh-cli@hostname)
+  --limit <n>     Max Nachrichten fuer receive
+  --working-on <> Aktuelle Aufgabe fuer register
 
 Kurzformen: s=status, r=receive, h=history, reg=register, get=pull
 `)
