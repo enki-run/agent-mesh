@@ -22,7 +22,7 @@ services:
 
   nats:
     image: nats:2-alpine
-    command: ["-js", "-sd", "/data", "-m", "8222"]
+    command: ["-js", "-sd", "/data", "-m", "8222", "--max_payload", "131072"]
     volumes:
       - nats-data:/data
     healthcheck:

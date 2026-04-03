@@ -18,6 +18,9 @@ export const DEFAULT_TTL_SECONDS = 86400; // 24h
 export const MAX_PAYLOAD_BYTES = 65536; // 64 KB
 export const RATE_LIMIT_PER_MINUTE = 60;
 export const PRESENCE_TTL_SECONDS = 300; // 5 min
+export const MAX_AGENTS = 100;
+export const MESSAGE_RETENTION_DAYS = 30;
+export const ACTIVITY_RETENTION_DAYS = 90;
 
 export const RECOMMENDED_MESSAGE_TYPES = [
   "deploy_request", "deploy_status", "review_request", "review_result",

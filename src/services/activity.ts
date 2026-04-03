@@ -80,6 +80,26 @@ export class ActivityService {
     };
   }
 
+  rotate(retentionDays: number): number {
+    const cutoff = new Date(
+      Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const result = this.db
+      .prepare("DELETE FROM activity_log WHERE created_at < ?")
+      .run(cutoff);
+    return result.changes;
+  }
+
+  rotateMessages(retentionDays: number): number {
+    const cutoff = new Date(
+      Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const result = this.db
+      .prepare("DELETE FROM messages WHERE created_at < ?")
+      .run(cutoff);
+    return result.changes;
+  }
+
   logAsync(params: {
     action: string;
     entity_type: string;

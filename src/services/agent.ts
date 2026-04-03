@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { ulid } from "ulidx";
 import type Database from "better-sqlite3";
 import type { Agent } from "../types";
+import { MAX_AGENTS } from "../types";
 import type { ActivityService } from "./activity";
 
 export function hashToken(token: string): string {
@@ -36,6 +37,14 @@ export class AgentService {
     name: string,
     adminName?: string,
   ): { agent: Agent; plaintextToken: string } {
+    // Check max agents limit
+    const count = this.db
+      .prepare("SELECT COUNT(*) as cnt FROM agents WHERE is_active = 1")
+      .get() as { cnt: number };
+    if (count.cnt >= MAX_AGENTS) {
+      throw new Error(`Maximum number of agents (${MAX_AGENTS}) reached`);
+    }
+
     const id = ulid();
     const now = new Date().toISOString();
     const plaintextToken = generateToken();

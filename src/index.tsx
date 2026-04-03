@@ -18,7 +18,7 @@ import {
 } from "./auth.js";
 import { createMcpServer } from "./mcp/server.js";
 import { createOAuthRoutes } from "./oauth.js";
-import { RATE_LIMIT_PER_MINUTE, VERSION, LIMITS } from "./types.js";
+import { RATE_LIMIT_PER_MINUTE, VERSION, LIMITS, MESSAGE_RETENTION_DAYS, ACTIVITY_RETENTION_DAYS } from "./types.js";
 import type { Env, AppVariables, MessagePriority } from "./types.js";
 
 // --- Views ---
@@ -523,6 +523,13 @@ app.route("/", createOAuthRoutes(agents));
 
 // --- Start server + graceful shutdown ---
 async function start() {
+  // Rotate old data on startup
+  const msgRotated = activity.rotateMessages(MESSAGE_RETENTION_DAYS);
+  const actRotated = activity.rotate(ACTIVITY_RETENTION_DAYS);
+  if (msgRotated > 0 || actRotated > 0) {
+    console.log(`Rotated: ${msgRotated} messages, ${actRotated} activity entries`);
+  }
+
   await nats.connect();
   console.log("Connected to NATS");
 
