@@ -6,6 +6,12 @@ interface ActivityPageProps {
   result: PaginatedResult<Activity>;
   userRole?: string;
   csrfToken?: string;
+  agentAvatars?: Record<string, string>;
+}
+
+function avatarUrl(avatarId: string | null | undefined): string | null {
+  if (!avatarId) return null;
+  return `/avatars/${avatarId}.png`;
 }
 
 const ACTION_ICONS: Record<string, string> = {
@@ -28,7 +34,7 @@ const ACTION_COLOR: Record<string, string> = {
   login_failure: "#904040",
 };
 
-export const ActivityPage: FC<ActivityPageProps> = ({ result, userRole, csrfToken }) => {
+export const ActivityPage: FC<ActivityPageProps> = ({ result, userRole, csrfToken, agentAvatars }) => {
   const { data: activities, total, has_more, offset, limit } = result;
 
   // Group by date
@@ -72,7 +78,12 @@ export const ActivityPage: FC<ActivityPageProps> = ({ result, userRole, csrfToke
                     {a.summary ?? a.action}
                   </div>
                   <div style="font-family: var(--font-mono); font-size: 0.69rem; color: var(--color-light); margin-top: 0.15rem;">
-                    <span style="color: var(--color-subtle);">{a.agent_name ?? "System"}</span>
+                    <span style="display: inline-flex; align-items: center; gap: 0.23rem; color: var(--color-subtle);">
+                      {a.agent_name && avatarUrl(agentAvatars?.[a.agent_name]) && (
+                        <img src={avatarUrl(agentAvatars?.[a.agent_name])!} style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" />
+                      )}
+                      {a.agent_name ?? "System"}
+                    </span>
                     <span style="margin: 0 0.31rem;">·</span>
                     {new Date(a.created_at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
                     <span style="margin-left: 0.62rem; color: var(--color-ghost);">{a.entity_type}</span>

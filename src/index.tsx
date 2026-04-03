@@ -347,6 +347,7 @@ app.get("/", (c) => {
       activities={activityResult.data}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
+      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
@@ -542,6 +543,7 @@ app.get("/activity", (c) => {
       result={result}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
+      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });

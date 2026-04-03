@@ -13,6 +13,7 @@ interface HomeProps {
   activities: Activity[];
   userRole?: string;
   csrfToken?: string;
+  agentAvatars?: Record<string, string>;
 }
 
 function fmtDate(iso: string): string {
@@ -24,7 +25,12 @@ function fmtDate(iso: string): string {
   });
 }
 
-export const HomePage: FC<HomeProps> = ({ stats, activities, userRole, csrfToken }) => {
+function avatarUrl(avatarId: string | null | undefined): string | null {
+  if (!avatarId) return null;
+  return `/avatars/${avatarId}.png`;
+}
+
+export const HomePage: FC<HomeProps> = ({ stats, activities, userRole, csrfToken, agentAvatars }) => {
   return (
     <Layout title="Dashboard" activePath="/" userRole={userRole} csrfToken={csrfToken}>
       <h1 style="font-size: 1.38rem; margin-bottom: 1.23rem;">Dashboard</h1>
@@ -55,7 +61,10 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, userRole, csrfToken
             {activities.map((a) => (
               <li>
                 <time>{fmtDate(a.created_at)}</time>
-                <span style="font-size: 0.69rem; color: var(--color-ghost); margin-right: 0.31rem;">
+                <span style="display: inline-flex; align-items: center; gap: 0.23rem; font-size: 0.69rem; color: var(--color-ghost); margin-right: 0.31rem;">
+                  {a.agent_name && avatarUrl(agentAvatars?.[a.agent_name]) && (
+                    <img src={avatarUrl(agentAvatars?.[a.agent_name])!} style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;" />
+                  )}
                   {a.agent_name ?? "System"}
                 </span>
                 {a.summary ?? a.action}

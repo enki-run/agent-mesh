@@ -111,7 +111,12 @@ export const MessagesPage: FC<MessagesPageProps> = ({ result, userRole, csrfToke
                     </span>
                   </td>
                   <td style="padding: 0.46rem 0.62rem; font-family: var(--font-mono); font-size: 0.77rem; color: var(--color-muted);">
-                    {m.to}
+                    <span style="display: inline-flex; align-items: center; gap: 0.31rem;">
+                      {avatarUrl(agentAvatars?.[m.to]) && (
+                        <img src={avatarUrl(agentAvatars?.[m.to])!} style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; vertical-align: middle;" />
+                      )}
+                      {m.to}
+                    </span>
                   </td>
                   <td style="padding: 0.46rem 0.62rem; font-family: var(--font-mono); font-size: 0.77rem;">
                     {m.type}
