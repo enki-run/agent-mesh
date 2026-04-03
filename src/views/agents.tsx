@@ -186,16 +186,13 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                       name="name"
                       value={a.name}
                       required
-                      style="font-family: var(--font-mono); font-size: 0.85rem; padding: 2px 6px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--color-body); width: 140px;"
-                      onfocus="this.style.borderColor='var(--color-border)';this.style.background='var(--color-page)'"
-                      onblur="this.style.borderColor='transparent';this.style.background='transparent'"
+                      style="font-family: var(--font-mono); font-size: 0.85rem; padding: 2px 6px; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-page); color: var(--color-body); width: 140px;"
                     />
                     <button
                       type="submit"
-                      style="font-family: var(--font-mono); font-size: 0.62rem; padding: 1px 5px; background: none; border: 1px solid var(--color-border); color: var(--color-subtle); border-radius: 3px; cursor: pointer; opacity: 0.6;"
-                      title="Umbenennen"
+                      style="font-family: var(--font-mono); font-size: 0.69rem; padding: 2px 8px; background: none; border: 1px solid var(--color-border); color: var(--color-body); border-radius: 3px; cursor: pointer;"
                     >
-                      &#x270E;
+                      Speichern
                     </button>
                   </form>
                 </td>
