@@ -188,7 +188,7 @@ func cmdSend(url, token string, args []string) {
 		if err != nil {
 			fatal("Stdin lesen fehlgeschlagen: %v", err)
 		}
-		payload = strings.TrimRight(string(data), "\n")
+		payload = strings.TrimSpace(string(data))
 	} else if len(payloadArgs) > 0 {
 		// Payload as argument(s)
 		payload = strings.Join(payloadArgs, " ")
@@ -198,7 +198,7 @@ func cmdSend(url, token string, args []string) {
 		if err != nil {
 			fatal("Stdin lesen fehlgeschlagen: %v", err)
 		}
-		payload = strings.TrimRight(string(data), "\n")
+		payload = strings.TrimSpace(string(data))
 	} else {
 		fmt.Fprintf(os.Stderr, "mesh-cli send %s %s: Nachricht fehlt.\n\n", to, msgType)
 		fmt.Fprintln(os.Stderr, "  Drei Wege eine Nachricht zu senden:")
@@ -495,11 +495,14 @@ func mcpCall(url, token, tool string, args map[string]any) map[string]any {
 	if rpcErr, ok := rpcResp["error"].(map[string]any); ok {
 		msg := str(rpcErr["message"])
 		// Make common errors more readable
-		if strings.Contains(msg, "Too big") {
+		if strings.Contains(msg, "too_big") || strings.Contains(msg, "Too big") || strings.Contains(msg, "65536") {
 			fatal("Nachricht zu gross (max 64 KB). Kuerze den Inhalt oder teile ihn auf.")
 		}
 		if strings.Contains(msg, "Not Acceptable") {
 			fatal("Server hat die Anfrage abgelehnt. Moeglicherweise falsche URL?\n  Aktuelle URL: %s", url)
+		}
+		if strings.Contains(msg, "validation error") || strings.Contains(msg, "Invalid arguments") {
+			fatal("Ungueltige Eingabe: %s", msg)
 		}
 		fatal("Server-Fehler: %s", msg)
 	}
@@ -514,14 +517,21 @@ func mcpCall(url, token, tool string, args map[string]any) map[string]any {
 	text := str(first["text"])
 
 	if isErr, ok := result["isError"].(bool); ok && isErr {
-		// Make tool errors more readable
 		if strings.Contains(text, "not found") {
 			fatal("Agent nicht gefunden. Verfuegbare Agents: mesh-cli status")
 		}
 		if strings.Contains(text, "Rate limit") {
 			fatal("%s", text)
 		}
+		if strings.Contains(text, "too_big") || strings.Contains(text, "Too big") || strings.Contains(text, "65536") {
+			fatal("Nachricht zu gross (max 64 KB). Kuerze den Inhalt oder teile ihn auf.")
+		}
 		fatal("Fehler: %s", text)
+	}
+
+	// Also check raw response body for oversized payload errors
+	if strings.Contains(string(respBody), "too_big") || strings.Contains(string(respBody), "65536") {
+		fatal("Nachricht zu gross (max 64 KB). Kuerze den Inhalt oder teile ihn auf.")
 	}
 
 	var parsed map[string]any
