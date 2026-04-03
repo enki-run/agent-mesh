@@ -77,12 +77,15 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
             {agents.map((a) => {
               const online = isOnline(a.last_seen_at);
               return (
-                <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start;">
-                  <div style="flex-shrink: 0;">
+                <div style={`background: var(--color-surface); border: 2px solid ${online ? '#4a9a6a' : 'var(--color-border)'}; border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start;${online ? ' box-shadow: 0 0 8px rgba(74,154,106,0.15);' : ' opacity: 0.6;'}`}>
+                  <div style="flex-shrink: 0; position: relative;">
                     {a.avatar ? (
-                      <img src={avatarUrl(a.avatar)!} style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" />
+                      <img src={avatarUrl(a.avatar)!} style={`width: 48px; height: 48px; border-radius: 50%; object-fit: cover;${online ? '' : ' filter: grayscale(0.7);'}`} />
                     ) : (
                       <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--color-border);" />
+                    )}
+                    {online && (
+                      <div style="position: absolute; bottom: 1px; right: 1px; width: 12px; height: 12px; background: #4a9a6a; border-radius: 50%; border: 2px solid var(--color-surface);" />
                     )}
                   </div>
                   <div style="min-width: 0; flex: 1;">
