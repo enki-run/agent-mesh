@@ -77,10 +77,16 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
             {agents.map((a) => {
               const online = isOnline(a.last_seen_at);
               return (
-                <div style={`background: var(--color-surface); border: 2px solid ${online ? '#4a9a6a' : 'var(--color-border)'}; border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start;${online ? ' box-shadow: 0 0 8px rgba(74,154,106,0.15);' : ' opacity: 0.6;'}`}>
+                <div style={online
+                  ? "background: var(--color-surface); border: 2px solid #4a9a6a; border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start; box-shadow: 0 0 8px rgba(74,154,106,0.15);"
+                  : "background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start; opacity: 0.5;"
+                }>
                   <div style="flex-shrink: 0; position: relative;">
                     {a.avatar ? (
-                      <img src={avatarUrl(a.avatar)!} style={`width: 48px; height: 48px; border-radius: 50%; object-fit: cover;${online ? '' : ' filter: grayscale(0.7);'}`} />
+                      <img src={avatarUrl(a.avatar)!} style={online
+                        ? "width: 48px; height: 48px; border-radius: 50%; object-fit: cover;"
+                        : "width: 48px; height: 48px; border-radius: 50%; object-fit: cover; filter: grayscale(0.7);"
+                      } />
                     ) : (
                       <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--color-border);" />
                     )}
