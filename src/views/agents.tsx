@@ -138,14 +138,14 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
             {agents.map((a) => (
               <tr style="border-bottom: 1px solid var(--color-divider);">
                 <td style="padding: 0.46rem 0.62rem; font-weight: 500;">
-                  <form method="post" action="/agents/rename" style="display: flex; gap: 0.31rem; align-items: center;">
+                  <div style="display: flex; gap: 0.31rem; align-items: center;">
                     <div style="position: relative; flex-shrink: 0;">
                       {a.avatar ? (
                         <img
                           src={avatarUrl(a.avatar)!}
                           style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; cursor: pointer;"
                           onclick={`var p=document.getElementById('avatar-picker-${a.id}');p.style.display=p.style.display==='none'?'block':'none'`}
-                          title="Avatar ändern"
+                          title="Avatar aendern"
                         />
                       ) : (
                         <div
@@ -154,47 +154,53 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                           title="Avatar setzen"
                         />
                       )}
-                      <div
-                        id={`avatar-picker-${a.id}`}
-                        style="display: none; position: absolute; top: 36px; left: 0; z-index: 50; background: var(--color-page); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.46rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12); width: 228px;"
-                      >
-                        <div style="font-size: 0.62rem; color: var(--color-subtle); margin-bottom: 0.31rem; font-weight: 600;">Avatar wählen</div>
-                        <div style="display: grid; grid-template-columns: repeat(6, 32px); gap: 4px;">
-                          {AVATAR_IDS.map((avId) => (
-                            <form method="post" action="/agents/set-avatar" style="display: inline;">
-                              <input type="hidden" name="csrf" value={csrfToken} />
-                              <input type="hidden" name="id" value={a.id} />
-                              <input type="hidden" name="avatar" value={avId} />
-                              <button
-                                type="submit"
-                                style="padding: 0; border: none; background: none; cursor: pointer; display: block;"
-                              >
-                                <img
-                                  src={`/avatars/${avId}.png`}
-                                  style={`width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid ${a.avatar === avId ? '#4a7a4a' : 'transparent'}; transition: border-color 0.12s;`}
-                                />
-                              </button>
-                            </form>
-                          ))}
-                        </div>
-                      </div>
                     </div>
-                    <input type="hidden" name="csrf" value={csrfToken} />
-                    <input type="hidden" name="id" value={a.id} />
-                    <input
-                      type="text"
-                      name="name"
-                      value={a.name}
-                      required
-                      style="font-family: var(--font-mono); font-size: 0.85rem; padding: 2px 6px; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-page); color: var(--color-body); width: 140px;"
-                    />
-                    <button
-                      type="submit"
-                      style="font-family: var(--font-mono); font-size: 0.69rem; padding: 2px 8px; background: none; border: 1px solid var(--color-border); color: var(--color-body); border-radius: 3px; cursor: pointer;"
-                    >
-                      Speichern
-                    </button>
-                  </form>
+                    <form method="post" action="/agents/rename" style="display: flex; gap: 0.31rem; align-items: center;">
+                      <input type="hidden" name="csrf" value={csrfToken} />
+                      <input type="hidden" name="id" value={a.id} />
+                      <input
+                        type="text"
+                        name="name"
+                        value={a.name}
+                        required
+                        style="font-family: var(--font-mono); font-size: 0.85rem; padding: 2px 6px; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-page); color: var(--color-body); width: 140px;"
+                      />
+                      <button
+                        type="submit"
+                        style="font-family: var(--font-mono); font-size: 0.69rem; padding: 2px 8px; background: none; border: 1px solid var(--color-border); color: var(--color-body); border-radius: 3px; cursor: pointer;"
+                      >
+                        Speichern
+                      </button>
+                    </form>
+                  </div>
+                  {/* Avatar picker — OUTSIDE the rename form */}
+                  <div
+                    id={`avatar-picker-${a.id}`}
+                    style="display: none; position: absolute; z-index: 50; background: var(--color-page); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.46rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12); width: 228px; margin-top: 4px;"
+                  >
+                    <div style="font-size: 0.62rem; color: var(--color-subtle); margin-bottom: 0.31rem; font-weight: 600;">Avatar waehlen</div>
+                    <div style="display: grid; grid-template-columns: repeat(6, 32px); gap: 4px;">
+                      {AVATAR_IDS.map((avId) => (
+                        <form method="post" action="/agents/set-avatar" style="display: inline;">
+                          <input type="hidden" name="csrf" value={csrfToken} />
+                          <input type="hidden" name="id" value={a.id} />
+                          <input type="hidden" name="avatar" value={avId} />
+                          <button
+                            type="submit"
+                            style="padding: 0; border: none; background: none; cursor: pointer; display: block;"
+                          >
+                            <img
+                              src={`/avatars/${avId}.png`}
+                              style={a.avatar === avId
+                                ? "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid #4a7a4a;"
+                                : "width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid transparent;"
+                              }
+                            />
+                          </button>
+                        </form>
+                      ))}
+                    </div>
+                  </div>
                 </td>
                 <td style="padding: 0.46rem 0.62rem;">
                   {a.is_active ? (
