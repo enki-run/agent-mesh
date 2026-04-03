@@ -49,6 +49,38 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
           <div style="font-size: 0.77rem; color: #904040; margin-top: 0.46rem; font-weight: 600;">
             Token wird nur einmal angezeigt!
           </div>
+
+          <div style="margin-top: 1rem; font-size: 0.77rem; color: var(--color-subtle); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
+            Einrichtung
+          </div>
+
+          <div style="margin-top: 0.46rem;">
+            <div style="font-size: 0.77rem; font-weight: 600; margin-bottom: 0.23rem;">Claude Code / Gemini CLI</div>
+            <pre style="font-family: var(--font-mono); font-size: 0.69rem; background: var(--color-bg); padding: 0.62rem; border-radius: 3px; border: 1px solid var(--color-border); overflow-x: auto; white-space: pre; line-height: 1.5;">{`// ~/.claude/settings.json → mcpServers
+"mesh": {
+  "type": "streamable-http",
+  "url": "https://mesh.enki.run/mcp",
+  "headers": {
+    "Authorization": "Bearer ${newToken}"
+  }
+}`}</pre>
+          </div>
+
+          <div style="margin-top: 0.62rem;">
+            <div style="font-size: 0.77rem; font-weight: 600; margin-bottom: 0.23rem;">Claude Desktop</div>
+            <pre style="font-family: var(--font-mono); font-size: 0.69rem; background: var(--color-bg); padding: 0.62rem; border-radius: 3px; border: 1px solid var(--color-border); overflow-x: auto; white-space: pre; line-height: 1.5;">{`// claude_desktop_config.json → mcpServers
+"mesh": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "https://mesh.enki.run/mcp"]
+}
+// OAuth-Flow: Token "${newToken}" im Browser eingeben`}</pre>
+          </div>
+
+          <div style="margin-top: 0.62rem;">
+            <div style="font-size: 0.77rem; font-weight: 600; margin-bottom: 0.23rem;">mesh-cli</div>
+            <pre style="font-family: var(--font-mono); font-size: 0.69rem; background: var(--color-bg); padding: 0.62rem; border-radius: 3px; border: 1px solid var(--color-border); overflow-x: auto; white-space: pre; line-height: 1.5;">{`export MESH_TOKEN="${newToken}"
+./mesh-cli status`}</pre>
+          </div>
         </div>
       )}
 
