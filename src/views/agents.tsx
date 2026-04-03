@@ -109,10 +109,43 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                   <form method="post" action="/agents/rename" style="display: flex; gap: 0.31rem; align-items: center;">
                     <div style="position: relative; flex-shrink: 0;">
                       {a.avatar ? (
-                        <img src={avatarUrl(a.avatar)!} style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />
+                        <img
+                          src={avatarUrl(a.avatar)!}
+                          style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; cursor: pointer;"
+                          onclick={`var p=document.getElementById('avatar-picker-${a.id}');p.style.display=p.style.display==='none'?'block':'none'`}
+                          title="Avatar ändern"
+                        />
                       ) : (
-                        <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-border);" />
+                        <div
+                          style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-border); cursor: pointer;"
+                          onclick={`var p=document.getElementById('avatar-picker-${a.id}');p.style.display=p.style.display==='none'?'block':'none'`}
+                          title="Avatar setzen"
+                        />
                       )}
+                      <div
+                        id={`avatar-picker-${a.id}`}
+                        style="display: none; position: absolute; top: 36px; left: 0; z-index: 50; background: var(--color-page); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.46rem; box-shadow: 0 4px 12px rgba(0,0,0,0.12); width: 228px;"
+                      >
+                        <div style="font-size: 0.62rem; color: var(--color-subtle); margin-bottom: 0.31rem; font-weight: 600;">Avatar wählen</div>
+                        <div style="display: grid; grid-template-columns: repeat(6, 32px); gap: 4px;">
+                          {AVATAR_IDS.map((avId) => (
+                            <form method="post" action="/agents/set-avatar" style="display: inline;">
+                              <input type="hidden" name="csrf" value={csrfToken} />
+                              <input type="hidden" name="id" value={a.id} />
+                              <input type="hidden" name="avatar" value={avId} />
+                              <button
+                                type="submit"
+                                style="padding: 0; border: none; background: none; cursor: pointer; display: block;"
+                              >
+                                <img
+                                  src={`/avatars/${avId}.png`}
+                                  style={`width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid ${a.avatar === avId ? '#4a7a4a' : 'transparent'}; transition: border-color 0.12s;`}
+                                />
+                              </button>
+                            </form>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <input type="hidden" name="csrf" value={csrfToken} />
                     <input type="hidden" name="id" value={a.id} />
@@ -175,6 +208,13 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                         </button>
                       </form>
                     )}
+                    <form method="post" action="/agents/delete" style="display: inline;" onsubmit="return confirm('Agent wirklich löschen? Der Name kann danach wiederverwendet werden.')">
+                      <input type="hidden" name="csrf" value={csrfToken} />
+                      <input type="hidden" name="id" value={a.id} />
+                      <button type="submit" style="font-family: var(--font-mono); font-size: 0.69rem; padding: 2px 8px; background: #904040; border: 1px solid #904040; color: #fff; border-radius: 3px; cursor: pointer;">
+                        Löschen
+                      </button>
+                    </form>
                   </div>
                 </td>
               </tr>

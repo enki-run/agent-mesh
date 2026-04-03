@@ -336,6 +336,7 @@ app.get("/", (c) => {
     .get(dayAgo) as { count: number };
 
   const activityResult = activity.list({ limit: 5, offset: 0 });
+  const allAgents = agents.list();
 
   return c.html(
     <HomePage
@@ -345,9 +346,10 @@ app.get("/", (c) => {
         recentMessages: recentMessagesRow.count,
       }}
       activities={activityResult.data}
+      agents={allAgents}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
+      agentAvatars={Object.fromEntries(allAgents.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
@@ -495,6 +497,24 @@ app.post("/agents/reset-token", async (c) => {
     const flashKey = setFlash({ newToken: result.plaintextToken });
     return c.redirect(`/agents?flash=${flashKey}`);
   }
+  return c.redirect("/agents");
+});
+
+app.post("/agents/delete", async (c) => {
+  const agent = c.get("agent");
+  if (agent?.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+
+  const cookieSecret = cookieSecretFor(c.env);
+  const body = await c.req.parseBody();
+  const id = body["id"] as string;
+  const csrf = body["csrf"] as string;
+
+  if (!validateCsrfToken(csrf, cookieSecret)) {
+    const flashKey = setFlash({ error: "Ungültiger CSRF-Token." });
+    return c.redirect(`/agents?flash=${flashKey}`);
+  }
+
+  agents.deleteById(id, agent.name);
   return c.redirect("/agents");
 });
 

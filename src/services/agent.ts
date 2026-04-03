@@ -205,6 +205,33 @@ export class AgentService {
     return false;
   }
 
+  deleteById(id: string, adminName?: string): boolean {
+    const agent = this.db
+      .prepare("SELECT name FROM agents WHERE id = ?")
+      .get(id) as { name: string } | undefined;
+
+    if (!agent) return false;
+
+    const result = this.db
+      .prepare("DELETE FROM agents WHERE id = ?")
+      .run(id);
+
+    clearTokenCache();
+
+    if (result.changes > 0) {
+      this.activity.log({
+        action: "agent_deleted",
+        entity_type: "agent",
+        entity_id: id,
+        summary: `Agent "${agent.name}" deleted`,
+        agent_name: adminName,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   resetToken(
     id: string,
     adminName?: string,
