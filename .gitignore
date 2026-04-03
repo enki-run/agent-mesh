@@ -9,3 +9,4 @@ cli/mesh-cli-*
 
 # Design docs (kept in buddy/ernie)
 docs/
+build_onepager.py
