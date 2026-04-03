@@ -79,6 +79,8 @@ func main() {
 		cmdSend(url, token, cmdArgs)
 	case "receive", "recv", "r":
 		cmdReceive(url, token, cmdArgs)
+	case "get", "pull":
+		cmdGet(url, token, cmdArgs)
 	case "reply":
 		cmdReply(url, token, cmdArgs)
 	case "history", "hist", "h":
@@ -306,6 +308,48 @@ func cmdReceive(url, token string, args []string) {
 	}
 
 	fmt.Printf("\n%d Nachricht(en)\n", len(messages))
+}
+
+func cmdGet(url, token string, args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "mesh-cli get: Message-ID fehlt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Usage: mesh-cli get <message_id>")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Gibt nur die rohe Payload aus — ideal zum Pipen:")
+		fmt.Fprintln(os.Stderr, "    mesh-cli get msg_01ABC... > script.sh")
+		fmt.Fprintln(os.Stderr, "    mesh-cli get msg_01ABC... | bash")
+		fmt.Fprintln(os.Stderr, "    mesh-cli get msg_01ABC... | python3")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Message-IDs findest du in: mesh-cli receive")
+		os.Exit(1)
+	}
+
+	msgID := args[0]
+
+	// Use mesh_history to fetch the specific message by ID
+	result := mcpCall(url, token, "mesh_history", map[string]any{
+		"correlation_id": msgID,
+	})
+
+	messages, _ := result["messages"].([]any)
+	for _, m := range messages {
+		msg := m.(map[string]any)
+		if str(msg["id"]) == msgID {
+			fmt.Print(str(msg["payload"]))
+			return
+		}
+	}
+
+	// Message not found in thread — might be a standalone message
+	// Try with the ID as the message itself
+	if len(messages) == 1 {
+		msg := messages[0].(map[string]any)
+		fmt.Print(str(msg["payload"]))
+		return
+	}
+
+	fatal("Nachricht %s nicht gefunden.", msgID)
 }
 
 func cmdReply(url, token string, args []string) {
@@ -619,6 +663,7 @@ Befehle:
   mesh-cli status                          Wer ist online?
   mesh-cli send <agent> <typ> <nachricht>  Nachricht senden
   mesh-cli receive                         Neue Nachrichten abholen
+  mesh-cli get <msg_id>                    Rohe Payload ausgeben (pipebar!)
   mesh-cli reply <msg_id> <antwort>        Auf Nachricht antworten
   mesh-cli history <msg_id>                Thread-Verlauf anzeigen
   mesh-cli register <rolle>                Sich registrieren
@@ -640,6 +685,12 @@ Optionen:
   --limit <n>    Max Nachrichten fuer receive
   --type <t>     Typ-Filter fuer receive
 
-Kurzformen: s=status, r=receive, h=history, reg=register
+Scripts & Dateien uebertragen:
+  mesh-cli get <msg_id> > script.sh        Payload als Datei speichern
+  mesh-cli get <msg_id> | bash             Script direkt ausfuehren
+  mesh-cli get <msg_id> | python3          Python-Script ausfuehren
+  cat runbook.md | mesh-cli send ops info  Datei an Agent senden
+
+Kurzformen: s=status, r=receive, h=history, reg=register, get=pull
 `)
 }
