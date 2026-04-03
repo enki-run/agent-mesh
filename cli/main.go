@@ -267,13 +267,14 @@ func cmdReceive(url, token string, args []string) {
 	fmt.Printf("%-15s %-15s %-8s %s\n", "VON", "TYP", "ZEIT", "NACHRICHT")
 	fmt.Println(strings.Repeat("─", 70))
 
-	for _, m := range messages {
+	for i, m := range messages {
 		msg := m.(map[string]any)
 		from := str(msg["from"])
 		msgType := str(msg["type"])
 		created := str(msg["created_at"])
 		payload := str(msg["payload"])
 		msgID := str(msg["id"])
+		context := str(msg["context"])
 
 		t, err := time.Parse(time.RFC3339Nano, created)
 		timeStr := created
@@ -281,16 +282,27 @@ func cmdReceive(url, token string, args []string) {
 			timeStr = t.Local().Format("15:04")
 		}
 
-		// Show first line, truncated
-		firstLine := strings.SplitN(payload, "\n", 2)[0]
-		if len(firstLine) > 55 {
-			firstLine = firstLine[:52] + "..."
+		// Header
+		fmt.Printf("[%s] %s %s → %s [%s]\n", timeStr, color("\033[1m", from), color("\033[33m", msgType), "du", msgID[:20]+"...")
+
+		// Context
+		if context != "" && context != "mesh-cli" {
+			fmt.Printf("  Kontext: %s\n", context)
 		}
 
-		fmt.Printf("%-15s %-15s %-8s %s\n", from, msgType, timeStr, firstLine)
+		// Full payload
+		fmt.Println()
+		for _, line := range strings.Split(payload, "\n") {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
 
-		// Show message ID for reply
-		fmt.Printf("%s  → reply: mesh-cli reply %s \"antwort\"\n", strings.Repeat(" ", 40), msgID)
+		// Reply hint
+		fmt.Printf("  → %s\n", color("\033[2m", fmt.Sprintf("mesh-cli reply %s \"antwort\"", msgID)))
+
+		if i < len(messages)-1 {
+			fmt.Println(strings.Repeat("─", 70))
+		}
 	}
 
 	fmt.Printf("\n%d Nachricht(en)\n", len(messages))
