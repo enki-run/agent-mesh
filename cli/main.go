@@ -16,7 +16,14 @@ const defaultURL = "https://mesh.enki.run/mcp"
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+	if len(args) == 0 {
+		printUsage()
+		fmt.Println()
+		hint("Starte mit: mesh-cli status")
+		os.Exit(0)
+	}
+
+	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		printUsage()
 		os.Exit(0)
 	}
@@ -32,11 +39,15 @@ func main() {
 			if i+1 < len(args) {
 				url = args[i+1]
 				i++
+			} else {
+				fatal("--url braucht einen Wert, z.B. --url https://mesh.example.com/mcp")
 			}
 		case "--token":
 			if i+1 < len(args) {
 				token = args[i+1]
 				i++
+			} else {
+				fatal("--token braucht einen Wert, z.B. --token bt_...")
 			}
 		default:
 			remaining = append(remaining, args[i])
@@ -44,7 +55,13 @@ func main() {
 	}
 
 	if token == "" {
-		fatal("MESH_TOKEN nicht gesetzt. Setze via: export MESH_TOKEN=bt_...")
+		fmt.Fprintln(os.Stderr, "mesh-cli: Kein Token gesetzt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Option 1: export MESH_TOKEN=bt_dein_token")
+		fmt.Fprintln(os.Stderr, "  Option 2: mesh-cli --token bt_dein_token status")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Token bekommst du vom Admin im Dashboard: https://mesh.enki.run/agents")
+		os.Exit(1)
 	}
 
 	if len(remaining) == 0 {
@@ -69,7 +86,10 @@ func main() {
 	case "register", "reg":
 		cmdRegister(url, token, cmdArgs)
 	default:
-		fatal("Unbekannter Befehl: %s", cmd)
+		fmt.Fprintf(os.Stderr, "mesh-cli: Unbekannter Befehl '%s'\n\n", cmd)
+		fmt.Fprintln(os.Stderr, "Verfuegbare Befehle: status, send, receive, reply, history, register")
+		fmt.Fprintln(os.Stderr, "Hilfe: mesh-cli --help")
+		os.Exit(1)
 	}
 }
 
@@ -78,6 +98,12 @@ func main() {
 func cmdStatus(url, token string) {
 	result := mcpCall(url, token, "mesh_status", map[string]any{})
 	agents, _ := result["agents"].([]any)
+
+	if len(agents) == 0 {
+		fmt.Println("Keine Agents registriert.")
+		hint("Erstelle Agents im Dashboard: https://mesh.enki.run/agents")
+		return
+	}
 
 	fmt.Printf("%-18s %-15s %-8s %s\n", "AGENT", "ROLE", "STATUS", "WORKING ON")
 	fmt.Println(strings.Repeat("─", 70))
@@ -103,33 +129,94 @@ func cmdStatus(url, token string) {
 		}
 		fmt.Printf("%-18s %-15s %-8s %s\n", name, role, status, workingOn)
 	}
+	fmt.Printf("\n%d Agent(en)\n", len(agents))
 }
 
 func cmdSend(url, token string, args []string) {
-	if len(args) < 3 {
-		fatal("Usage: mesh-cli send <to> <type> <payload> [--context <ctx>]")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "mesh-cli send: Empfaenger fehlt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Usage:")
+		fmt.Fprintln(os.Stderr, "    mesh-cli send <agent> <type> <nachricht>")
+		fmt.Fprintln(os.Stderr, "    mesh-cli send <agent> <type> - < datei.txt")
+		fmt.Fprintln(os.Stderr, "    echo 'text' | mesh-cli send <agent> <type>")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Beispiele:")
+		fmt.Fprintln(os.Stderr, `    mesh-cli send ops info "Server neugestartet"`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli send ops incident "DB nicht erreichbar"`)
+		fmt.Fprintln(os.Stderr, `    docker logs app 2>&1 | mesh-cli send ops incident`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli send broadcast info "Wartung um 22 Uhr"`)
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Typen: info, question, incident, deploy_request, review_request, task_update")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Wer ist da?  mesh-cli status")
+		os.Exit(1)
+	}
+
+	if len(args) == 1 {
+		fmt.Fprintf(os.Stderr, "mesh-cli send %s: Nachrichtentyp fehlt.\n\n", args[0])
+		fmt.Fprintln(os.Stderr, "  Typen: info, question, incident, deploy_request, review_request, task_update")
+		fmt.Fprintf(os.Stderr, "  Beispiel: mesh-cli send %s info \"Deine Nachricht\"\n", args[0])
+		os.Exit(1)
 	}
 
 	to := args[0]
 	msgType := args[1]
-	payload := args[2]
 	context := "mesh-cli"
+	var payload string
 
-	// Check for stdin pipe
-	if payload == "-" {
+	// Parse optional flags first
+	var payloadArgs []string
+	for i := 2; i < len(args); i++ {
+		if args[i] == "--context" && i+1 < len(args) {
+			context = args[i+1]
+			i++
+		} else {
+			payloadArgs = append(payloadArgs, args[i])
+		}
+	}
+
+	// Determine payload source (priority order):
+	// 1. Explicit "-" → read stdin
+	// 2. Payload argument(s) given → use them
+	// 3. No payload but stdin is piped → read stdin automatically
+	// 4. Nothing → error
+
+	if len(payloadArgs) == 1 && payloadArgs[0] == "-" {
+		// Explicit stdin marker
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fatal("Stdin lesen fehlgeschlagen: %v", err)
 		}
-		payload = string(data)
+		payload = strings.TrimRight(string(data), "\n")
+	} else if len(payloadArgs) > 0 {
+		// Payload as argument(s)
+		payload = strings.Join(payloadArgs, " ")
+	} else if stdinHasData() {
+		// Auto-detect piped stdin
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fatal("Stdin lesen fehlgeschlagen: %v", err)
+		}
+		payload = strings.TrimRight(string(data), "\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "mesh-cli send %s %s: Nachricht fehlt.\n\n", to, msgType)
+		fmt.Fprintln(os.Stderr, "  Drei Wege eine Nachricht zu senden:")
+		fmt.Fprintf(os.Stderr, "    mesh-cli send %s %s \"Dein Text hier\"\n", to, msgType)
+		fmt.Fprintf(os.Stderr, "    echo \"Dein Text\" | mesh-cli send %s %s\n", to, msgType)
+		fmt.Fprintf(os.Stderr, "    cat datei.txt | mesh-cli send %s %s\n", to, msgType)
+		os.Exit(1)
 	}
 
-	// Parse optional flags
-	for i := 3; i < len(args); i++ {
-		if args[i] == "--context" && i+1 < len(args) {
-			context = args[i+1]
-			i++
-		}
+	if payload == "" {
+		fmt.Fprintln(os.Stderr, "mesh-cli send: Leere Nachricht. Nichts zu senden.")
+		os.Exit(1)
+	}
+
+	// Warn if payload is large
+	payloadBytes := len([]byte(payload))
+	if payloadBytes > 60000 {
+		fmt.Fprintf(os.Stderr, "Warnung: Payload ist %d KB (Limit: 64 KB)\n", payloadBytes/1024)
 	}
 
 	params := map[string]any{
@@ -140,7 +227,7 @@ func cmdSend(url, token string, args []string) {
 	}
 
 	result := mcpCall(url, token, "mesh_send", params)
-	fmt.Printf("Sent %s to %s [%s]\n", str(result["id"]), to, msgType)
+	fmt.Printf("✓ Gesendet an %s [%s] (%s)\n", to, msgType, str(result["id"]))
 }
 
 func cmdReceive(url, token string, args []string) {
@@ -150,14 +237,21 @@ func cmdReceive(url, token string, args []string) {
 		switch args[i] {
 		case "--limit":
 			if i+1 < len(args) {
-				n, _ := strconv.Atoi(args[i+1])
+				n, err := strconv.Atoi(args[i+1])
+				if err != nil {
+					fatal("--limit braucht eine Zahl, z.B. --limit 10")
+				}
 				params["limit"] = n
 				i++
+			} else {
+				fatal("--limit braucht eine Zahl, z.B. --limit 10")
 			}
 		case "--type":
 			if i+1 < len(args) {
 				params["type"] = args[i+1]
 				i++
+			} else {
+				fatal("--type braucht einen Wert, z.B. --type question")
 			}
 		}
 	}
@@ -170,7 +264,7 @@ func cmdReceive(url, token string, args []string) {
 		return
 	}
 
-	fmt.Printf("%-15s %-15s %-8s %s\n", "FROM", "TYPE", "TIME", "PAYLOAD")
+	fmt.Printf("%-15s %-15s %-8s %s\n", "VON", "TYP", "ZEIT", "NACHRICHT")
 	fmt.Println(strings.Repeat("─", 70))
 
 	for _, m := range messages {
@@ -179,6 +273,7 @@ func cmdReceive(url, token string, args []string) {
 		msgType := str(msg["type"])
 		created := str(msg["created_at"])
 		payload := str(msg["payload"])
+		msgID := str(msg["id"])
 
 		t, err := time.Parse(time.RFC3339Nano, created)
 		timeStr := created
@@ -186,31 +281,46 @@ func cmdReceive(url, token string, args []string) {
 			timeStr = t.Local().Format("15:04")
 		}
 
-		if len(payload) > 60 {
-			payload = payload[:57] + "..."
+		// Show first line, truncated
+		firstLine := strings.SplitN(payload, "\n", 2)[0]
+		if len(firstLine) > 55 {
+			firstLine = firstLine[:52] + "..."
 		}
-		payload = strings.ReplaceAll(payload, "\n", " ")
 
-		fmt.Printf("%-15s %-15s %-8s %s\n", from, msgType, timeStr, payload)
+		fmt.Printf("%-15s %-15s %-8s %s\n", from, msgType, timeStr, firstLine)
+
+		// Show message ID for reply
+		fmt.Printf("%s  → reply: mesh-cli reply %s \"antwort\"\n", strings.Repeat(" ", 40), msgID)
 	}
 
 	fmt.Printf("\n%d Nachricht(en)\n", len(messages))
 }
 
 func cmdReply(url, token string, args []string) {
-	if len(args) < 2 {
-		fatal("Usage: mesh-cli reply <message_id> <payload>")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "mesh-cli reply: Message-ID fehlt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Usage: mesh-cli reply <message_id> <antwort>")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Die Message-ID findest du in der Ausgabe von: mesh-cli receive")
+		os.Exit(1)
+	}
+
+	if len(args) == 1 {
+		fmt.Fprintf(os.Stderr, "mesh-cli reply: Antworttext fehlt.\n\n")
+		fmt.Fprintf(os.Stderr, "  Beispiel: mesh-cli reply %s \"Deine Antwort\"\n", args[0])
+		os.Exit(1)
 	}
 
 	msgID := args[0]
 	payload := args[1]
 
-	if payload == "-" {
+	if payload == "-" || (len(args) == 2 && stdinHasData()) {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fatal("Stdin lesen fehlgeschlagen: %v", err)
 		}
-		payload = string(data)
+		payload = strings.TrimRight(string(data), "\n")
 	}
 
 	params := map[string]any{
@@ -220,12 +330,16 @@ func cmdReply(url, token string, args []string) {
 	}
 
 	result := mcpCall(url, token, "mesh_reply", params)
-	fmt.Printf("Reply gesendet: %s\n", str(result["id"]))
+	fmt.Printf("✓ Antwort gesendet (%s)\n", str(result["id"]))
 }
 
 func cmdHistory(url, token string, args []string) {
 	if len(args) < 1 {
-		fatal("Usage: mesh-cli history <correlation_id>")
+		fmt.Fprintln(os.Stderr, "mesh-cli history: Thread-ID fehlt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Usage: mesh-cli history <message_id>")
+		fmt.Fprintln(os.Stderr, "  Zeigt alle Nachrichten in einem Thread (Frage + Antworten).")
+		os.Exit(1)
 	}
 
 	params := map[string]any{
@@ -240,7 +354,7 @@ func cmdHistory(url, token string, args []string) {
 		return
 	}
 
-	fmt.Printf("Thread: %s\n\n", args[0])
+	fmt.Printf("Thread: %s (%d Nachrichten)\n\n", args[0], len(messages))
 
 	for _, m := range messages {
 		msg := m.(map[string]any)
@@ -257,7 +371,6 @@ func cmdHistory(url, token string, args []string) {
 		}
 
 		fmt.Printf("  [%s] %s → %s [%s]\n", timeStr, from, to, msgType)
-		// Indent payload lines
 		for _, line := range strings.Split(payload, "\n") {
 			if line != "" {
 				fmt.Printf("    %s\n", line)
@@ -269,7 +382,14 @@ func cmdHistory(url, token string, args []string) {
 
 func cmdRegister(url, token string, args []string) {
 	if len(args) < 1 {
-		fatal("Usage: mesh-cli register <role> [--capabilities <a,b>] [--working-on <text>]")
+		fmt.Fprintln(os.Stderr, "mesh-cli register: Rolle fehlt.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Usage: mesh-cli register <rolle>")
+		fmt.Fprintln(os.Stderr, "  Beispiele:")
+		fmt.Fprintln(os.Stderr, "    mesh-cli register developer")
+		fmt.Fprintln(os.Stderr, `    mesh-cli register ops --capabilities "ssh,docker"`)
+		fmt.Fprintln(os.Stderr, `    mesh-cli register reviewer --working-on "Security Audit"`)
+		os.Exit(1)
 	}
 
 	params := map[string]any{
@@ -283,17 +403,21 @@ func cmdRegister(url, token string, args []string) {
 				caps := strings.Split(args[i+1], ",")
 				params["capabilities"] = caps
 				i++
+			} else {
+				fatal("--capabilities braucht einen Wert, z.B. --capabilities ssh,docker")
 			}
 		case "--working-on":
 			if i+1 < len(args) {
 				params["working_on"] = args[i+1]
 				i++
+			} else {
+				fatal("--working-on braucht einen Wert, z.B. --working-on \"Feature X\"")
 			}
 		}
 	}
 
 	mcpCall(url, token, "mesh_register", params)
-	fmt.Printf("Registriert als %s\n", args[0])
+	fmt.Printf("✓ Registriert als %s\n", args[0])
 }
 
 // ── MCP Client ──────────────────────────────────────────────────
@@ -311,12 +435,12 @@ func mcpCall(url, token, tool string, args map[string]any) map[string]any {
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		fatal("JSON encode: %v", err)
+		fatal("Interner Fehler (JSON encode): %v", err)
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
-		fatal("Request: %v", err)
+		fatal("Interner Fehler (Request): %v", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -326,50 +450,83 @@ func mcpCall(url, token, tool string, args map[string]any) map[string]any {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		if strings.Contains(err.Error(), "no such host") {
+			fatal("Server nicht erreichbar: %s\nPruefe MESH_URL oder --url", url)
+		}
+		if strings.Contains(err.Error(), "connection refused") {
+			fatal("Verbindung abgelehnt: %s\nLaeuft der Server?", url)
+		}
+		if strings.Contains(err.Error(), "timeout") {
+			fatal("Timeout bei Verbindung zu %s", url)
+		}
 		fatal("Verbindung fehlgeschlagen: %v", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fatal("Response lesen: %v", err)
+		fatal("Antwort konnte nicht gelesen werden: %v", err)
 	}
 
 	if resp.StatusCode == 401 {
-		fatal("Nicht autorisiert. Token pruefen.")
+		fmt.Fprintln(os.Stderr, "mesh-cli: Nicht autorisiert.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Moegliche Ursachen:")
+		fmt.Fprintln(os.Stderr, "  - Token ist falsch oder abgelaufen")
+		fmt.Fprintln(os.Stderr, "  - Agent wurde deaktiviert")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  Token pruefen: echo $MESH_TOKEN")
+		os.Exit(1)
+	}
+
+	if resp.StatusCode == 503 {
+		fatal("Server ist ueberlastet oder nicht bereit (503). Versuche es gleich nochmal.")
 	}
 
 	if resp.StatusCode != 200 {
-		fatal("HTTP %d: %s", resp.StatusCode, string(respBody))
+		fatal("Server-Fehler (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 
 	var rpcResp map[string]any
 	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
-		fatal("Response parse: %v", err)
+		fatal("Server-Antwort nicht lesbar. Antwort: %s", truncate(string(respBody), 200))
 	}
 
 	if rpcErr, ok := rpcResp["error"].(map[string]any); ok {
-		fatal("Fehler: %s", str(rpcErr["message"]))
+		msg := str(rpcErr["message"])
+		// Make common errors more readable
+		if strings.Contains(msg, "Too big") {
+			fatal("Nachricht zu gross (max 64 KB). Kuerze den Inhalt oder teile ihn auf.")
+		}
+		if strings.Contains(msg, "Not Acceptable") {
+			fatal("Server hat die Anfrage abgelehnt. Moeglicherweise falsche URL?\n  Aktuelle URL: %s", url)
+		}
+		fatal("Server-Fehler: %s", msg)
 	}
 
-	// Extract text content from MCP response
 	result, _ := rpcResp["result"].(map[string]any)
 	content, _ := result["content"].([]any)
 	if len(content) == 0 {
-		fatal("Leere Antwort vom Server")
+		fatal("Leere Antwort vom Server. Versuche es nochmal.")
 	}
 
 	first := content[0].(map[string]any)
 	text := str(first["text"])
 
-	// Check if it's an error response from the tool
 	if isErr, ok := result["isError"].(bool); ok && isErr {
-		fatal("%s", text)
+		// Make tool errors more readable
+		if strings.Contains(text, "not found") {
+			fatal("Agent nicht gefunden. Verfuegbare Agents: mesh-cli status")
+		}
+		if strings.Contains(text, "Rate limit") {
+			fatal("%s", text)
+		}
+		fatal("Fehler: %s", text)
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		fatal("Tool response parse: %v\n%s", err, text)
+		fatal("Antwort konnte nicht verarbeitet werden: %s", truncate(text, 200))
 	}
 
 	return parsed
@@ -394,6 +551,13 @@ func str(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
 func color(code, text string) string {
 	if !isTTY() {
 		return text
@@ -409,41 +573,51 @@ func isTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+func stdinHasData() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice == 0
+}
+
+func hint(msg string) {
+	fmt.Fprintf(os.Stderr, "  → %s\n", msg)
+}
+
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "mesh-cli: "+format+"\n", args...)
 	os.Exit(1)
 }
 
 func printUsage() {
-	fmt.Print(`mesh-cli — Agent Mesh CLI
+	fmt.Print(`mesh-cli — Agent Mesh Kommandozeile
 
-Usage:
-  mesh-cli status                              Agents und Online-Status
-  mesh-cli send <to> <type> <payload>          Nachricht senden
-  mesh-cli send <to> <type> -                  Payload von stdin lesen
-  mesh-cli receive [--limit N] [--type T]      Inbox pruefen
-  mesh-cli reply <msg_id> <payload>            Auf Nachricht antworten
-  mesh-cli history <correlation_id>            Thread anzeigen
-  mesh-cli register <role> [--capabilities X]  Registrieren
+Befehle:
+  mesh-cli status                          Wer ist online?
+  mesh-cli send <agent> <typ> <nachricht>  Nachricht senden
+  mesh-cli receive                         Neue Nachrichten abholen
+  mesh-cli reply <msg_id> <antwort>        Auf Nachricht antworten
+  mesh-cli history <msg_id>                Thread-Verlauf anzeigen
+  mesh-cli register <rolle>                Sich registrieren
 
-Aliases: s=status, r=receive/recv, h=history/hist, reg=register
+Nachrichten senden:
+  mesh-cli send ops info "Server laeuft"       Direkt als Argument
+  echo "logs" | mesh-cli send ops incident     Piped von stdin (auto)
+  cat datei.txt | mesh-cli send ops info       Datei-Inhalt senden
+  mesh-cli send broadcast info "An alle"       An alle Agents
 
-Umgebungsvariablen:
-  MESH_TOKEN    Bearer Token (Pflicht)
-  MESH_URL      MCP Endpoint (default: https://mesh.enki.run/mcp)
+Nachrichtentypen:
+  info, question, incident, deploy_request, deploy_status,
+  review_request, review_result, task_update
 
-Piping:
-  echo "logs" | mesh-cli send ops incident -
-  docker logs app | mesh-cli send ops incident -
-  ssh server "journalctl -u app" | mesh-cli send ops incident -
+Optionen:
+  --token <t>    Token (oder: export MESH_TOKEN=bt_...)
+  --url <u>      Server-URL (default: mesh.enki.run)
+  --context <c>  Kontext fuer send (default: mesh-cli)
+  --limit <n>    Max Nachrichten fuer receive
+  --type <t>     Typ-Filter fuer receive
 
-Flags:
-  --token <t>          Token (statt MESH_TOKEN)
-  --url <u>            URL (statt MESH_URL)
-  --context <c>        Context fuer send (default: mesh-cli)
-  --limit <n>          Max Messages fuer receive
-  --type <t>           Type-Filter fuer receive
-  --capabilities <a,b> Komma-getrennt fuer register
-  --working-on <text>  Aktuelle Aufgabe fuer register
+Kurzformen: s=status, r=receive, h=history, reg=register
 `)
 }
