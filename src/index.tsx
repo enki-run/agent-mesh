@@ -149,6 +149,26 @@ app.use("*", async (c, next) => {
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
 });
 
+// --- Static files (no auth) ---
+app.get("/avatars/:file", async (c) => {
+  const file = c.req.param("file");
+  if (!/^avatar-\d{2}\.png$/.test(file)) return c.text("Not found", 404);
+  const { readFile } = await import("fs/promises");
+  const { join, dirname } = await import("path");
+  const { fileURLToPath } = await import("url");
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  try {
+    let filePath = join(currentDir, "../public/avatars", file);
+    try { await import("fs/promises").then(f => f.access(filePath)); } catch {
+      filePath = join(currentDir, "../../public/avatars", file);
+    }
+    const data = await readFile(filePath);
+    return new Response(data, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
+  } catch {
+    return c.text("Not found", 404);
+  }
+});
+
 // --- Health endpoint (no auth) ---
 app.get("/health", async (c) => {
   const natsOk = await nats.ping();
