@@ -125,6 +125,11 @@ export function validateSessionCookie(
 // --- Auth middleware ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 
+// Track recent logins to avoid flooding the activity log
+// Key: agentName, Value: timestamp of last log
+const recentLogins = new Map<string, number>();
+const LOGIN_LOG_INTERVAL_MS = 30 * 60 * 1000; // Log at most once per 30 minutes per agent
+
 export function authMiddleware(agents: AgentService, nats: NatsPresence, activity?: ActivityService) {
   return createMiddleware<HonoEnv>(async (c, next) => {
     const path = c.req.path;
@@ -191,17 +196,22 @@ export function authMiddleware(agents: AgentService, nats: NatsPresence, activit
       const agentCtx: RequestAgent = { name: resolvedName, role: resolvedRole };
       c.set("agent", agentCtx);
 
-      // Log auth event (best-effort)
+      // Log auth event (best-effort, throttled to once per 30 min per agent)
       if (activity) {
-        try {
-          activity.logAsync({
-            action: "auth_login",
-            entity_type: "session",
-            entity_id: resolvedName,
-            summary: `${resolvedName} authenticated (${resolvedRole})`,
-            agent_name: resolvedName,
-          });
-        } catch {}
+        const now = Date.now();
+        const lastLog = recentLogins.get(resolvedName) ?? 0;
+        if (now - lastLog > LOGIN_LOG_INTERVAL_MS) {
+          recentLogins.set(resolvedName, now);
+          try {
+            activity.logAsync({
+              action: "auth_login",
+              entity_type: "session",
+              entity_id: resolvedName,
+              summary: `${resolvedName} authenticated (${resolvedRole})`,
+              agent_name: resolvedName,
+            });
+          } catch {}
+        }
       }
 
       // Update presence (best-effort — NATS may not be connected during startup)
