@@ -35,6 +35,7 @@ export class AgentService {
 
   create(
     name: string,
+    avatar?: string,
     adminName?: string,
   ): { agent: Agent; plaintextToken: string } {
     // Check max agents limit
@@ -52,10 +53,10 @@ export class AgentService {
 
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, token_hash, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO agents (id, name, avatar, token_hash, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`,
       )
-      .run(id, name, token_hash, now, now);
+      .run(id, name, avatar ?? null, token_hash, now, now);
 
     clearTokenCache();
 
@@ -74,6 +75,7 @@ export class AgentService {
       capabilities: null,
       token_hash,
       is_active: 1,
+      avatar: avatar ?? null,
       working_on: null,
       last_seen_at: null,
       created_at: now,
@@ -86,7 +88,7 @@ export class AgentService {
   list(): Omit<Agent, "token_hash">[] {
     return this.db
       .prepare(
-        "SELECT id, name, role, capabilities, is_active, working_on, last_seen_at, created_at, updated_at FROM agents ORDER BY name",
+        "SELECT id, name, role, capabilities, is_active, avatar, working_on, last_seen_at, created_at, updated_at FROM agents ORDER BY name",
       )
       .all() as Omit<Agent, "token_hash">[];
   }

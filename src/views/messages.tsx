@@ -1,12 +1,14 @@
 import type { FC } from "hono/jsx";
 import { Layout } from "./layout.js";
 import type { Message, PaginatedResult } from "../types.js";
+import { AVATARS } from "../avatars.js";
 
 interface MessagesPageProps {
   result: PaginatedResult<Message>;
   userRole?: string;
   csrfToken?: string;
   filterAgent?: string;
+  agentAvatars?: Record<string, string>; // name -> avatar ID
 }
 
 function fmtDate(iso: string): string {
@@ -24,13 +26,19 @@ function truncate(str: string, maxLen: number): string {
   return str.slice(0, maxLen) + "…";
 }
 
+function avatarDataUrl(avatarId: string | null | undefined): string | null {
+  if (!avatarId) return null;
+  const av = AVATARS.find((a) => a.id === avatarId);
+  return av?.data ?? null;
+}
+
 function priorityBadgeClass(priority: string): string {
   if (priority === "high") return "badge badge-high";
   if (priority === "low") return "badge badge-low";
   return "badge badge-normal";
 }
 
-export const MessagesPage: FC<MessagesPageProps> = ({ result, userRole, csrfToken, filterAgent }) => {
+export const MessagesPage: FC<MessagesPageProps> = ({ result, userRole, csrfToken, filterAgent, agentAvatars }) => {
   const { data: messages, total, has_more, offset, limit } = result;
 
   const prevOffset = Math.max(0, offset - limit);
@@ -97,7 +105,12 @@ export const MessagesPage: FC<MessagesPageProps> = ({ result, userRole, csrfToke
               {messages.map((m) => (
                 <tr style="border-bottom: 1px solid var(--color-divider);">
                   <td style="padding: 0.46rem 0.62rem; font-family: var(--font-mono); font-size: 0.77rem; font-weight: 600;">
-                    {m.from}
+                    <span style="display: inline-flex; align-items: center; gap: 0.31rem;">
+                      {avatarDataUrl(agentAvatars?.[m.from]) && (
+                        <img src={avatarDataUrl(agentAvatars?.[m.from])!} style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; vertical-align: middle;" />
+                      )}
+                      {m.from}
+                    </span>
                   </td>
                   <td style="padding: 0.46rem 0.62rem; font-family: var(--font-mono); font-size: 0.77rem; color: var(--color-muted);">
                     {m.to}

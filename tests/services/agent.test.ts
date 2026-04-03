@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { AgentService, hashToken } from "../../src/services/agent";
 import { ActivityService } from "../../src/services/activity";
 
 function createTestDb(): Database.Database {
   const db = new Database(":memory:");
-  db.exec(readFileSync("migrations/0001_initial.sql", "utf-8"));
+  const migrationFiles = readdirSync("migrations").filter((f) => f.endsWith(".sql")).sort();
+  for (const file of migrationFiles) {
+    db.exec(readFileSync(`migrations/${file}`, "utf-8"));
+  }
   return db;
 }
 

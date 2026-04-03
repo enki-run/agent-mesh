@@ -50,6 +50,7 @@ export interface Agent {
   capabilities: string | null; // JSON array stored as string
   token_hash: string;
   is_active: number;
+  avatar: string | null;
   working_on: string | null;
   last_seen_at: string | null;
   created_at: string;

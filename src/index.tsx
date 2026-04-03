@@ -360,6 +360,7 @@ app.post("/agents/create", async (c) => {
   const cookieSecret = cookieSecretFor(c.env);
   const body = await c.req.parseBody();
   const name = (body["name"] as string)?.trim();
+  const avatar = (body["avatar"] as string)?.trim() || undefined;
   const csrf = body["csrf"] as string;
 
   if (!validateCsrfToken(csrf, cookieSecret)) {
@@ -373,7 +374,7 @@ app.post("/agents/create", async (c) => {
   }
 
   try {
-    const { plaintextToken } = agents.create(name, agent.name);
+    const { plaintextToken } = agents.create(name, avatar, agent.name);
     const flashKey = setFlash({ newToken: plaintextToken });
     return c.redirect(`/agents?flash=${flashKey}`);
   } catch (err: unknown) {
@@ -488,12 +489,19 @@ app.get("/messages", (c) => {
 
   const result = listMessages({ limit, offset, agent: filterAgent });
 
+  // Build agent name -> avatar map
+  const agentAvatars: Record<string, string> = {};
+  for (const a of agents.list()) {
+    if (a.avatar) agentAvatars[a.name] = a.avatar;
+  }
+
   return c.html(
     <MessagesPage
       result={result}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
       filterAgent={filterAgent}
+      agentAvatars={agentAvatars}
     />,
   );
 });

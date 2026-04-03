@@ -36,6 +36,7 @@ export function registerRegistryTools(
         const p = presence.get(agent.name) as PresenceEntry | undefined;
         return {
           name: agent.name,
+          avatar: agent.avatar ?? null,
           role: p?.role ?? agent.role ?? null,
           capabilities: p?.capabilities ?? (agent.capabilities ? JSON.parse(agent.capabilities) : null),
           is_active: agent.is_active === 1,

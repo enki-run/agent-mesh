@@ -1,6 +1,8 @@
 import type { FC } from "hono/jsx";
+import { raw } from "hono/html";
 import { Layout } from "./layout.js";
 import type { Agent } from "../types.js";
+import { AVATARS } from "../avatars.js";
 
 interface AgentsPageProps {
   agents: Omit<Agent, "token_hash">[];
@@ -8,6 +10,12 @@ interface AgentsPageProps {
   newToken?: string;
   error?: string;
   userRole?: string;
+}
+
+function avatarDataUrl(avatarId: string | null): string | null {
+  if (!avatarId) return null;
+  const av = AVATARS.find((a) => a.id === avatarId);
+  return av?.data ?? null;
 }
 
 function fmtDate(iso: string): string {
@@ -52,21 +60,36 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
         <div style="font-weight: 600; font-size: 0.85rem; color: var(--color-subtle); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.62rem;">
           Neuer Agent
         </div>
-        <form method="post" action="/agents/create" style="display: flex; gap: 0.62rem; align-items: center; flex-wrap: wrap;">
+        <form method="post" action="/agents/create" id="create-agent-form">
           <input type="hidden" name="csrf" value={csrfToken} />
-          <input
-            type="text"
-            name="name"
-            placeholder="Agent-Name"
-            required
-            style="font-family: var(--font-mono); font-size: 0.85rem; padding: 0.38rem 0.62rem; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-page); color: var(--color-body); min-width: 180px;"
-          />
-          <button
-            type="submit"
-            style="font-family: var(--font-mono); font-size: 0.77rem; padding: 0.38rem 1rem; background: #4a7a4a; color: #fff; border: none; border-radius: 3px; cursor: pointer;"
-          >
-            Erstellen
-          </button>
+          <input type="hidden" name="avatar" id="avatar-input" value="" />
+          <div style="display: flex; gap: 0.62rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.77rem;">
+            <input
+              type="text"
+              name="name"
+              placeholder="Agent-Name"
+              required
+              style="font-family: var(--font-mono); font-size: 0.85rem; padding: 0.38rem 0.62rem; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-page); color: var(--color-body); min-width: 180px;"
+            />
+            <button
+              type="submit"
+              style="font-family: var(--font-mono); font-size: 0.77rem; padding: 0.38rem 1rem; background: #4a7a4a; color: #fff; border: none; border-radius: 3px; cursor: pointer;"
+            >
+              Erstellen
+            </button>
+          </div>
+          <div style="font-size: 0.77rem; color: var(--color-subtle); margin-bottom: 0.38rem;">Avatar (optional):</div>
+          <div style="display: grid; grid-template-columns: repeat(6, 48px); gap: 6px;">
+            {AVATARS.map((av) => (
+              <img
+                src={av.data}
+                data-avatar-id={av.id}
+                class="avatar-option"
+                style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid transparent; cursor: pointer; transition: border-color 0.12s;"
+                onclick="document.getElementById('avatar-input').value=this.dataset.avatarId;document.querySelectorAll('.avatar-option').forEach(function(e){e.style.borderColor='transparent'});this.style.borderColor='#4a7a4a'"
+              />
+            ))}
+          </div>
         </form>
       </div>
 
@@ -90,6 +113,9 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                 <tr style="border-bottom: 1px solid var(--color-divider);">
                   <td style="padding: 0.46rem 0.62rem; font-weight: 500;">
                     <form method="post" action="/agents/rename" style="display: flex; gap: 0.31rem; align-items: center;">
+                      {avatarDataUrl(a.avatar) && (
+                        <img src={avatarDataUrl(a.avatar)!} style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0;" />
+                      )}
                       <input type="hidden" name="csrf" value={csrfToken} />
                       <input type="hidden" name="id" value={a.id} />
                       <input
