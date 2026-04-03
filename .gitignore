@@ -2,3 +2,7 @@ node_modules/
 dist/
 *.db
 .env
+
+# CLI binaries
+cli/mesh-cli
+cli/mesh-cli-*
