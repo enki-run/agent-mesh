@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json ./
+# Copy app files (invalidates cache on any code change)
 COPY src ./src
 COPY migrations ./migrations
 COPY public ./public
