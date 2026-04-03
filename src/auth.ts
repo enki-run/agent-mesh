@@ -3,6 +3,7 @@ import { createMiddleware } from "hono/factory";
 import { getCookie } from "hono/cookie";
 import type { Env, RequestAgent, AppVariables } from "./types";
 import type { AgentService } from "./services/agent";
+import type { ActivityService } from "./services/activity";
 
 // Minimal interface for NatsService — only what auth needs.
 // The full implementation lives in services/nats.ts (Task 5).
@@ -124,7 +125,7 @@ export function validateSessionCookie(
 // --- Auth middleware ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 
-export function authMiddleware(agents: AgentService, nats: NatsPresence) {
+export function authMiddleware(agents: AgentService, nats: NatsPresence, activity?: ActivityService) {
   return createMiddleware<HonoEnv>(async (c, next) => {
     const path = c.req.path;
 
@@ -189,6 +190,19 @@ export function authMiddleware(agents: AgentService, nats: NatsPresence) {
     if (resolvedName && resolvedRole) {
       const agentCtx: RequestAgent = { name: resolvedName, role: resolvedRole };
       c.set("agent", agentCtx);
+
+      // Log auth event (best-effort)
+      if (activity) {
+        try {
+          activity.logAsync({
+            action: "auth_login",
+            entity_type: "session",
+            entity_id: resolvedName,
+            summary: `${resolvedName} authenticated (${resolvedRole})`,
+            agent_name: resolvedName,
+          });
+        } catch {}
+      }
 
       // Update presence (best-effort — NATS may not be connected during startup)
       if (resolvedRole === "agent") {

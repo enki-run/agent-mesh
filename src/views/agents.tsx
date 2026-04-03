@@ -107,11 +107,13 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
               <tr style="border-bottom: 1px solid var(--color-divider);">
                 <td style="padding: 0.46rem 0.62rem; font-weight: 500;">
                   <form method="post" action="/agents/rename" style="display: flex; gap: 0.31rem; align-items: center;">
-                    {a.avatar ? (
-                      <img src={avatarUrl(a.avatar)!} style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0;" />
-                    ) : (
-                      <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-border); flex-shrink: 0;" />
-                    )}
+                    <div style="position: relative; flex-shrink: 0;">
+                      {a.avatar ? (
+                        <img src={avatarUrl(a.avatar)!} style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />
+                      ) : (
+                        <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--color-border);" />
+                      )}
+                    </div>
                     <input type="hidden" name="csrf" value={csrfToken} />
                     <input type="hidden" name="id" value={a.id} />
                     <input

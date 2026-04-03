@@ -241,7 +241,7 @@ app.post("/login", async (c) => {
 });
 
 // --- Auth middleware on all other routes ---
-app.use("*", authMiddleware(agents, nats));
+app.use("*", authMiddleware(agents, nats, activity));
 
 // --- Logout ---
 app.post("/logout", (c) => {
@@ -494,6 +494,24 @@ app.post("/agents/reset-token", async (c) => {
   if (result) {
     const flashKey = setFlash({ newToken: result.plaintextToken });
     return c.redirect(`/agents?flash=${flashKey}`);
+  }
+  return c.redirect("/agents");
+});
+
+app.post("/agents/set-avatar", async (c) => {
+  const agent = c.get("agent");
+  if (agent?.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+
+  const body = await c.req.parseBody();
+  const id = body["id"] as string;
+  const avatar = (body["avatar"] as string)?.trim() || null;
+  const csrf = body["csrf"] as string;
+  const cookieSecret = cookieSecretFor(c.env);
+
+  if (!validateCsrfToken(csrf, cookieSecret)) return c.redirect("/agents");
+
+  if (id && avatar) {
+    db.prepare("UPDATE agents SET avatar = ?, updated_at = ? WHERE id = ?").run(avatar, new Date().toISOString(), id);
   }
   return c.redirect("/agents");
 });
