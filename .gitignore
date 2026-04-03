@@ -6,3 +6,6 @@ dist/
 # CLI binaries
 cli/mesh-cli
 cli/mesh-cli-*
+
+# Design docs (kept in buddy/ernie)
+docs/
