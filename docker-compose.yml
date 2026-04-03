@@ -9,8 +9,8 @@ services:
       - DATABASE_PATH=/data/mesh.db
     volumes:
       - mesh-data:/data
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       nats:
         condition: service_healthy
