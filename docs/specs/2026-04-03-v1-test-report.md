@@ -1,7 +1,7 @@
 # Agent Mesh V1 — Test Report
 
 **Datum:** 2026-04-03T14:34Z
-**Umgebung:** mesh.enki.run (Coolify, kai/152.53.84.172)
+**Umgebung:** mesh.enki.run (Coolify)
 **Version:** 1.0.0
 
 ## Ergebnis: 29/29 bestanden
