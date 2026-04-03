@@ -254,6 +254,13 @@ app.all("/mcp", async (c) => {
   const agent = c.get("agent");
   const agentName = agent?.name ?? "anonymous";
 
+  // Ensure NATS consumers exist for this agent
+  try {
+    await nats.ensureConsumer(agentName);
+  } catch {
+    // Non-fatal — consumer creation may fail on first request, retry on next
+  }
+
   const server = createMcpServer(
     nats,
     agents,
