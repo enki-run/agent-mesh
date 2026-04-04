@@ -27,6 +27,7 @@ import { HomePage } from "./views/home.js";
 import { AgentsPage } from "./views/agents.js";
 import { MessagesPage } from "./views/messages.js";
 import { ActivityPage } from "./views/activity.js";
+import { ConversationsPage } from "./views/conversations.js";
 
 // --- Initialize services ---
 const dbPath = process.env.DATABASE_PATH || "./mesh.db";
@@ -729,6 +730,32 @@ app.get("/activity", (c) => {
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
       agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
+    />,
+  );
+});
+
+// --- Dashboard: Conversations ---
+app.get("/conversations", (c) => {
+  const agent = c.get("agent");
+  const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
+
+  const offsetParam = parseInt(c.req.query("offset") ?? "0", 10);
+  const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
+  const limit = LIMITS.PAGINATION_DEFAULT;
+
+  const result = listConversations({ limit, offset });
+
+  const agentAvatars: Record<string, string> = {};
+  for (const a of agents.list()) {
+    if (a.avatar) agentAvatars[a.name] = a.avatar;
+  }
+
+  return c.html(
+    <ConversationsPage
+      result={result}
+      userRole={agent?.role ?? undefined}
+      csrfToken={csrfToken}
+      agentAvatars={agentAvatars}
     />,
   );
 });

@@ -67,6 +67,7 @@ export const Layout: FC<LayoutProps> = ({ title, children, activePath, userRole,
               <a href="/agents" class={activePath === "/agents" ? "active" : ""}>Agents</a>
             )}
             <a href="/messages" class={activePath === "/messages" ? "active" : ""}>Messages</a>
+            <a href="/conversations" class={activePath === "/conversations" ? "active" : ""}>Conversations</a>
             <a href="/activity" class={activePath === "/activity" ? "active" : ""}>Log</a>
             <div class="controls">
               <button class="ctrl-btn" onclick="toggleTheme()" aria-label="Theme wechseln">
