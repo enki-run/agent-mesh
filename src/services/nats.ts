@@ -20,8 +20,8 @@ const MAX_AGE_NS = 7 * 24 * 60 * 60 * 1_000_000_000;
 const DUPLICATE_WINDOW_NS = 300_000_000_000;
 // 1 GB
 const MAX_BYTES = 1_073_741_824;
-// KV presence TTL: 300s in milliseconds
-const KV_TTL_MS = 300_000;
+// KV presence TTL: 600s in milliseconds
+const KV_TTL_MS = 600_000;
 // 30s ack wait in nanoseconds
 const ACK_WAIT_NS = 30 * 1_000_000_000;
 

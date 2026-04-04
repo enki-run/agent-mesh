@@ -326,10 +326,10 @@ app.get("/", (c) => {
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
 
   const totalAgentsRow = db.prepare("SELECT COUNT(*) as count FROM agents").get() as { count: number };
-  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const onlineAgentsRow = db
     .prepare("SELECT COUNT(*) as count FROM agents WHERE is_active = 1 AND last_seen_at > ?")
-    .get(fiveMinAgo) as { count: number };
+    .get(tenMinAgo) as { count: number };
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const recentMessagesRow = db
     .prepare("SELECT COUNT(*) as count FROM messages WHERE created_at > ?")
@@ -352,6 +352,39 @@ app.get("/", (c) => {
       agentAvatars={Object.fromEntries(allAgents.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
+});
+
+// --- Dashboard: Home JSON (for polling) ---
+app.get("/api/home", (c) => {
+  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const totalAgentsRow = db.prepare("SELECT COUNT(*) as count FROM agents").get() as { count: number };
+  const onlineAgentsRow = db
+    .prepare("SELECT COUNT(*) as count FROM agents WHERE is_active = 1 AND last_seen_at > ?")
+    .get(tenMinAgo) as { count: number };
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const recentMessagesRow = db
+    .prepare("SELECT COUNT(*) as count FROM messages WHERE created_at > ?")
+    .get(dayAgo) as { count: number };
+
+  const allAgents = agents.list();
+  const activityResult = activity.list({ limit: 5, offset: 0 });
+
+  return c.json({
+    stats: {
+      totalAgents: totalAgentsRow.count,
+      onlineAgents: onlineAgentsRow.count,
+      recentMessages: recentMessagesRow.count,
+    },
+    agents: allAgents.map((a) => ({
+      name: a.name,
+      role: a.role,
+      avatar: a.avatar,
+      working_on: a.working_on,
+      last_seen_at: a.last_seen_at,
+      is_active: a.is_active,
+    })),
+    activities: activityResult.data,
+  });
 });
 
 // --- Dashboard: Agents (admin only) ---
