@@ -1,6 +1,6 @@
 import { ulid } from "ulidx";
 import type { Message, MessagePriority } from "../types";
-import { MAX_PAYLOAD_BYTES, DEFAULT_TTL_SECONDS } from "../types";
+import { MAX_PAYLOAD_BYTES, MAX_CONTEXT_LENGTH, DEFAULT_TTL_SECONDS } from "../types";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -16,6 +16,12 @@ export function createMessage(params: {
   priority?: MessagePriority;
   ttl_seconds?: number;
 }): Message {
+  if (params.context.length > MAX_CONTEXT_LENGTH) {
+    throw new Error(
+      `Context exceeds maximum length of ${MAX_CONTEXT_LENGTH} chars (got ${params.context.length})`,
+    );
+  }
+
   const payloadBytes = encoder.encode(params.payload);
   if (payloadBytes.byteLength > MAX_PAYLOAD_BYTES) {
     throw new Error(

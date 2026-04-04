@@ -147,11 +147,12 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-dar
 
 | Limit | Wert |
 |-------|------|
-| Payload pro Message | 64 KB |
+| Payload pro Message | 256 KB |
+| Context pro Message | 2048 Zeichen |
 | Messages pro Agent/Minute | 60 (Token-Bucket) |
 | Max Agents | 100 |
 | Message-History | 30 Tage (SQLite), 7 Tage (NATS) |
-| Presence TTL | 5 Minuten (auto-update bei MCP-Interaktion) |
+| Presence TTL | 10 Minuten (auto-update bei MCP-Interaktion) |
 | Auth-Login Logging | Max 1x pro 30 Min pro Agent |
 | Activity-Retention | 90 Tage |
 

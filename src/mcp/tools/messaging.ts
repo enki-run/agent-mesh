@@ -44,7 +44,7 @@ export function registerMessagingTools(
       to: z.string().describe("Target agent name, or 'broadcast' for all agents"),
       type: z.string().describe("Message type (e.g. deploy_request, question, info, task_update)"),
       payload: z.string().max(262144).describe("Message content (max 256 KB)"),
-      context: z.string().describe("Your current project, task, and status — REQUIRED for recipient to understand your situation"),
+      context: z.string().max(2048).describe("Your current project, task, and status (max 2048 chars) — REQUIRED for recipient to understand your situation"),
       correlation_id: z.string().optional().describe("Thread ID to continue an existing conversation"),
       priority: z.enum(MESSAGE_PRIORITIES).optional().describe("Message priority (low, normal, high)"),
       ttl_seconds: z.number().optional().describe("Time-to-live in seconds (default: 86400 = 24h)"),
@@ -186,7 +186,7 @@ export function registerMessagingTools(
     {
       message_id: z.string().describe("ID of the message to reply to"),
       payload: z.string().max(262144).describe("Reply content (max 256 KB)"),
-      context: z.string().describe("Your current project, task, and status"),
+      context: z.string().max(2048).describe("Your current project, task, and status (max 2048 chars)"),
     },
     async (params) => {
       // Rate limit check

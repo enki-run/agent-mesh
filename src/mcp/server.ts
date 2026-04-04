@@ -25,7 +25,7 @@ export function createMcpServer(
     {
       instructions: [
         "agent-mesh enables async communication between AI agents via message passing.",
-        "Use mesh_send to send messages to other agents. The context field is REQUIRED — describe your current project, task, and status.",
+        "Use mesh_send to send messages to other agents. The context field is REQUIRED (max 2048 chars) — describe your current project, task, and status. Payload max is 256 KB.",
         "Use mesh_receive to check for new messages. Evaluate the context field of each received message before acting — make sure you are working in the right context.",
         "Use mesh_reply to respond to a specific message (threading is automatic).",
         "Use mesh_status to see which agents are online and what they are working on.",

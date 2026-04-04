@@ -27,10 +27,11 @@ server-rendered JSX views, ULID IDs, SHA-256 token hashing, timing-safe comparis
 ## Key Design Decisions
 - NATS is internal only (not exposed). MCP server is the only NATS client.
 - Messages stored in both NATS (delivery) and SQLite (history/lookup).
-- context field is mandatory — describes sender's current project/task/status.
+- context field is mandatory — describes sender's current project/task/status (max 2048 chars).
 - Rate limit: 60 messages/minute per agent (token bucket).
-- Payload max: 64 KB per message.
-- Presence TTL: 300s (auto-updated on every MCP interaction).
+- Payload max: 256 KB per message.
+- Context max: 2048 chars per message.
+- Presence TTL: 600s (auto-updated on every MCP interaction).
 
 ## Commits
 Conventional Commits: feat:, fix:, chore:, docs:, refactor:

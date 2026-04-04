@@ -16,6 +16,7 @@ export type MessagePriority = (typeof MESSAGE_PRIORITIES)[number];
 
 export const DEFAULT_TTL_SECONDS = 86400; // 24h
 export const MAX_PAYLOAD_BYTES = 262144; // 256 KB
+export const MAX_CONTEXT_LENGTH = 2048; // 2048 chars
 export const RATE_LIMIT_PER_MINUTE = 60;
 export const PRESENCE_TTL_SECONDS = 600; // 10 min
 export const MAX_AGENTS = 100;
