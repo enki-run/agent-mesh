@@ -123,6 +123,120 @@ function listMessages(params: { limit: number; offset: number; agent?: string })
   };
 }
 
+// --- Conversation threading ---
+interface ThreadSummary {
+  thread_id: string;
+  started_at: string;
+  last_activity: string;
+  message_count: number;
+}
+
+interface ConversationThread {
+  thread_id: string;
+  started_at: string;
+  last_activity: string;
+  message_count: number;
+  first_payload: string;
+  first_context: string | null;
+  participants: string[];
+  messages: Array<{
+    id: string;
+    from: string;
+    to: string;
+    type: string;
+    payload: string;
+    context: string;
+    correlation_id: string | null;
+    reply_to: string | null;
+    priority: MessagePriority;
+    ttl_seconds: number;
+    created_at: string;
+  }>;
+}
+
+function listConversations(params: { limit: number; offset: number }) {
+  const { limit, offset } = params;
+
+  // Count total threads
+  const countRow = db
+    .prepare("SELECT COUNT(*) as total FROM (SELECT DISTINCT COALESCE(correlation_id, id) FROM messages)")
+    .get() as { total: number } | undefined;
+  const total = countRow?.total ?? 0;
+
+  // Get thread summaries (paginated)
+  const summaries = db
+    .prepare(
+      `SELECT
+        COALESCE(correlation_id, id) AS thread_id,
+        MIN(created_at) AS started_at,
+        MAX(created_at) AS last_activity,
+        COUNT(*) AS message_count
+      FROM messages
+      GROUP BY COALESCE(correlation_id, id)
+      ORDER BY MAX(created_at) DESC
+      LIMIT ? OFFSET ?`
+    )
+    .all(limit, offset) as ThreadSummary[];
+
+  if (summaries.length === 0) {
+    return { data: [] as ConversationThread[], has_more: false, total, limit, offset };
+  }
+
+  // Fetch all messages for visible threads
+  const placeholders = summaries.map(() => "?").join(",");
+  const threadIds = summaries.map((s) => s.thread_id);
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
+      WHERE COALESCE(correlation_id, id) IN (${placeholders})
+      ORDER BY created_at ASC`
+    )
+    .all(...threadIds) as MessageRow[];
+
+  // Group messages by thread
+  const messagesByThread = new Map<string, MessageRow[]>();
+  for (const row of rows) {
+    const tid = row.correlation_id ?? row.id;
+    if (!messagesByThread.has(tid)) messagesByThread.set(tid, []);
+    messagesByThread.get(tid)!.push(row);
+  }
+
+  // Build conversation threads
+  const data: ConversationThread[] = summaries.map((s) => {
+    const msgs = messagesByThread.get(s.thread_id) ?? [];
+    const participantSet = new Set<string>();
+    for (const m of msgs) {
+      participantSet.add(m.from_agent);
+      participantSet.add(m.to_agent);
+    }
+    const first = msgs[0];
+    return {
+      thread_id: s.thread_id,
+      started_at: s.started_at,
+      last_activity: s.last_activity,
+      message_count: s.message_count,
+      first_payload: first?.payload ?? "",
+      first_context: first?.context ?? null,
+      participants: Array.from(participantSet),
+      messages: msgs.map((row) => ({
+        id: row.id,
+        from: row.from_agent,
+        to: row.to_agent,
+        type: row.type,
+        payload: row.payload,
+        context: row.context,
+        correlation_id: row.correlation_id,
+        reply_to: row.reply_to,
+        priority: row.priority as MessagePriority,
+        ttl_seconds: row.ttl_seconds,
+        created_at: row.created_at,
+      })),
+    };
+  });
+
+  return { data, has_more: offset + data.length < total, total, limit, offset };
+}
+
 // --- Hono app ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 const app = new Hono<HonoEnv>();
