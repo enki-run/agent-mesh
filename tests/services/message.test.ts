@@ -46,8 +46,8 @@ describe("Message Service", () => {
     expect(msg.reply_to).toBe("msg_prev");
   });
 
-  it("throws when payload exceeds 64 KB", () => {
-    const largePayload = "x".repeat(65537);
+  it("throws when payload exceeds 256 KB", () => {
+    const largePayload = "x".repeat(262145);
     expect(() =>
       createMessage({
         from: "a",
@@ -59,9 +59,9 @@ describe("Message Service", () => {
     ).toThrow(/exceeds maximum size/);
   });
 
-  it("allows payload at exactly 64 KB", () => {
-    // 65536 bytes of ASCII = 65536 chars
-    const exactPayload = "x".repeat(65536);
+  it("allows payload at exactly 256 KB", () => {
+    // 262144 bytes of ASCII = 262144 chars
+    const exactPayload = "x".repeat(262144);
     const msg = createMessage({
       from: "a",
       to: "b",
@@ -69,7 +69,7 @@ describe("Message Service", () => {
       payload: exactPayload,
       context: "test",
     });
-    expect(msg.payload).toHaveLength(65536);
+    expect(msg.payload).toHaveLength(262144);
   });
 
   it("detects expired message", () => {

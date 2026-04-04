@@ -43,7 +43,7 @@ export function registerMessagingTools(
     {
       to: z.string().describe("Target agent name, or 'broadcast' for all agents"),
       type: z.string().describe("Message type (e.g. deploy_request, question, info, task_update)"),
-      payload: z.string().max(65536).describe("Message content (max 64 KB)"),
+      payload: z.string().max(262144).describe("Message content (max 256 KB)"),
       context: z.string().describe("Your current project, task, and status — REQUIRED for recipient to understand your situation"),
       correlation_id: z.string().optional().describe("Thread ID to continue an existing conversation"),
       priority: z.enum(MESSAGE_PRIORITIES).optional().describe("Message priority (low, normal, high)"),
@@ -185,7 +185,7 @@ export function registerMessagingTools(
     "Reply to a specific message. Threading is automatic — the reply is linked to the original conversation thread.",
     {
       message_id: z.string().describe("ID of the message to reply to"),
-      payload: z.string().max(65536).describe("Reply content (max 64 KB)"),
+      payload: z.string().max(262144).describe("Reply content (max 256 KB)"),
       context: z.string().describe("Your current project, task, and status"),
     },
     async (params) => {
