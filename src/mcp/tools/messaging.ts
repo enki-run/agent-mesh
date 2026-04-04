@@ -98,11 +98,11 @@ export function registerMessagingTools(
         msg.created_at,
       );
 
-      // Publish to NATS
+      // Publish to NATS (lowercase subject for case-insensitive routing)
       const subject =
         params.to === "broadcast"
           ? "mesh.broadcast"
-          : `mesh.agents.${params.to}.inbox`;
+          : `mesh.agents.${params.to.toLowerCase()}.inbox`;
       await nats.publish(subject, serializeMessage(msg), msg.id);
 
       // Update presence
@@ -246,8 +246,8 @@ export function registerMessagingTools(
         msg.created_at,
       );
 
-      // Publish to NATS
-      const subject = `mesh.agents.${original.from_agent}.inbox`;
+      // Publish to NATS (lowercase for case-insensitive routing)
+      const subject = `mesh.agents.${original.from_agent.toLowerCase()}.inbox`;
       await nats.publish(subject, serializeMessage(msg), msg.id);
 
       // Update presence

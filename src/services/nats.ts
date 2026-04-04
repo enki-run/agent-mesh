@@ -73,16 +73,17 @@ export class NatsService {
   }
 
   async ensureConsumer(agentName: string): Promise<void> {
-    const inboxConsumer = `agent-${agentName}`;
-    const broadcastConsumer = `agent-${agentName}-broadcast`;
+    const normalizedName = agentName.toLowerCase();
+    const inboxConsumer = `agent-${normalizedName}`;
+    const broadcastConsumer = `agent-${normalizedName}-broadcast`;
 
-    // Inbox consumer
+    // Inbox consumer (lowercase subject for case-insensitive routing)
     try {
       await this.jsm.consumers.info(STREAM_NAME, inboxConsumer);
     } catch {
       await this.jsm.consumers.add(STREAM_NAME, {
         durable_name: inboxConsumer,
-        filter_subject: `mesh.agents.${agentName}.inbox`,
+        filter_subject: `mesh.agents.${normalizedName}.inbox`,
         ack_policy: AckPolicy.Explicit,
         max_deliver: 5,
         ack_wait: ACK_WAIT_NS,
@@ -104,8 +105,9 @@ export class NatsService {
   }
 
   async deleteConsumer(agentName: string): Promise<void> {
-    const inboxConsumer = `agent-${agentName}`;
-    const broadcastConsumer = `agent-${agentName}-broadcast`;
+    const normalizedName = agentName.toLowerCase();
+    const inboxConsumer = `agent-${normalizedName}`;
+    const broadcastConsumer = `agent-${normalizedName}-broadcast`;
 
     try {
       await this.jsm.consumers.delete(STREAM_NAME, inboxConsumer);
@@ -126,11 +128,13 @@ export class NatsService {
   ): Promise<PulledMessage[]> {
     const results: PulledMessage[] = [];
 
+    const normalizedName = agentName.toLowerCase();
+
     // Pull from inbox consumer
     try {
       const inboxConsumer = await this.js.consumers.get(
         STREAM_NAME,
-        `agent-${agentName}`,
+        `agent-${normalizedName}`,
       );
       const inboxMessages = await inboxConsumer.fetch({
         max_messages: limit,
@@ -150,7 +154,7 @@ export class NatsService {
     try {
       const broadcastConsumer = await this.js.consumers.get(
         STREAM_NAME,
-        `agent-${agentName}-broadcast`,
+        `agent-${normalizedName}-broadcast`,
       );
       const broadcastMessages = await broadcastConsumer.fetch({
         max_messages: limit,
