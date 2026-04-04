@@ -17,7 +17,7 @@ import {
   getCookieSecret,
 } from "./auth.js";
 import { createMcpServer } from "./mcp/server.js";
-import { createOAuthRoutes } from "./oauth.js";
+import { createOAuthRoutes, cleanupExpiredOAuthTokens } from "./oauth.js";
 import { RATE_LIMIT_PER_MINUTE, VERSION, LIMITS, MESSAGE_RETENTION_DAYS, ACTIVITY_RETENTION_DAYS } from "./types.js";
 import type { Env, AppVariables, MessagePriority } from "./types.js";
 
@@ -620,11 +620,15 @@ app.get("/activity", (c) => {
 });
 
 // --- OAuth routes ---
-app.route("/", createOAuthRoutes(agents));
+app.route("/", createOAuthRoutes(agents, db));
 
 // --- Start server + graceful shutdown ---
 async function start() {
   // Rotate old data on startup
+  const oauthCleaned = cleanupExpiredOAuthTokens(db);
+  if (oauthCleaned > 0) {
+    console.log(`Cleaned up ${oauthCleaned} expired OAuth tokens`);
+  }
   const msgRotated = activity.rotateMessages(MESSAGE_RETENTION_DAYS);
   const actRotated = activity.rotate(ACTIVITY_RETENTION_DAYS);
   if (msgRotated > 0 || actRotated > 0) {

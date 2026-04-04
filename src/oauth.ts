@@ -1,44 +1,47 @@
 import crypto from "node:crypto";
 import { Hono } from "hono";
+import type Database from "better-sqlite3";
 import { hashToken, timingSafeEqual, getCookieSecret } from "./auth.js";
 import type { AgentService } from "./services/agent.js";
 import type { Env, AppVariables } from "./types.js";
 
 // OAuth 2.1 for MCP server
-// Uses MESH_ADMIN_TOKEN as the basis for all crypto operations
-// Stateless: authorization codes are HMAC-signed timestamps
+// Uses OAUTH_SECRET (fallback: MESH_ADMIN_TOKEN) for code signing
 // PKCE (S256) is REQUIRED per OAuth 2.1
 // Multi-user: accepts admin token OR personal agent tokens
+// Token store: SQLite-backed (survives container restarts)
 
 const OAUTH_CLIENT_ID = "agent-mesh-mcp-client";
 const CODE_EXPIRY_MS = 300_000; // 5 minutes
 
-// In-memory token store: code -> { token, expiresAt }
-// Replaces Cloudflare KV — auto-cleaned up after 5 min
-const tokenStore = new Map<string, { token: string; expiresAt: number }>();
+// --- SQLite-backed token store (survives container restarts) ---
 
-function storeToken(code: string, token: string): void {
+function storeToken(db: Database.Database, code: string, token: string): void {
   const expiresAt = Date.now() + CODE_EXPIRY_MS;
-  tokenStore.set(code, { token, expiresAt });
-
-  // Schedule cleanup
-  setTimeout(() => {
-    const entry = tokenStore.get(code);
-    if (entry && Date.now() >= entry.expiresAt) {
-      tokenStore.delete(code);
-    }
-  }, CODE_EXPIRY_MS + 1000);
+  db.prepare(
+    "INSERT OR REPLACE INTO oauth_tokens (code, token, expires_at) VALUES (?, ?, ?)",
+  ).run(code, token, expiresAt);
 }
 
-function retrieveToken(code: string): string | null {
-  const entry = tokenStore.get(code);
-  if (!entry) return null;
-  if (Date.now() >= entry.expiresAt) {
-    tokenStore.delete(code);
-    return null;
-  }
-  tokenStore.delete(code);
-  return entry.token;
+function retrieveToken(db: Database.Database, code: string): string | null {
+  const row = db
+    .prepare("SELECT token, expires_at FROM oauth_tokens WHERE code = ?")
+    .get(code) as { token: string; expires_at: number } | undefined;
+
+  if (!row) return null;
+
+  // Always delete after retrieval (one-time use)
+  db.prepare("DELETE FROM oauth_tokens WHERE code = ?").run(code);
+
+  if (Date.now() >= row.expires_at) return null;
+  return row.token;
+}
+
+export function cleanupExpiredOAuthTokens(db: Database.Database): number {
+  const result = db
+    .prepare("DELETE FROM oauth_tokens WHERE expires_at < ?")
+    .run(Date.now());
+  return result.changes;
 }
 
 // --- Redirect URI validation ---
@@ -58,6 +61,18 @@ function isAllowedRedirectUri(uri: string): boolean {
   } catch {
     return false;
   }
+}
+
+// --- Resolve origin behind reverse proxy (Coolify/Traefik TLS termination) ---
+function resolveOrigin(c: { req: { url: string; header: (name: string) => string | undefined } }): string {
+  const url = new URL(c.req.url);
+  const proto = c.req.header("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  return `${proto}://${url.host}`;
+}
+
+// --- OAuth secret: prefer OAUTH_SECRET, fall back to MESH_ADMIN_TOKEN ---
+function getOAuthSecret(): string {
+  return process.env.OAUTH_SECRET || process.env.MESH_ADMIN_TOKEN || "";
 }
 
 // --- HMAC signing (Node.js crypto) ---
@@ -164,12 +179,12 @@ function resolveUser(
 // --- OAuth sub-app ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 
-export function createOAuthRoutes(agents: AgentService) {
+export function createOAuthRoutes(agents: AgentService, db: Database.Database) {
   const oauth = new Hono<HonoEnv>();
 
   // RFC 8414 — OAuth Authorization Server Metadata
   oauth.get("/.well-known/oauth-authorization-server", (c) => {
-    const origin = new URL(c.req.url).origin;
+    const origin = resolveOrigin(c);
     return c.json({
       issuer: origin,
       authorization_endpoint: `${origin}/oauth/authorize`,
@@ -289,13 +304,14 @@ export function createOAuthRoutes(agents: AgentService) {
       );
     }
 
-    // Generate authorization code (stateless, HMAC-signed)
-    const code = generateCode(adminToken);
+    // Generate authorization code (stateless, HMAC-signed with OAUTH_SECRET)
+    const oauthSecret = getOAuthSecret();
+    const code = generateCode(oauthSecret);
 
-    // SECURITY: Store token server-side in memory (5min TTL), never in the URL.
+    // SECURITY: Store token server-side in SQLite (5min TTL), never in the URL.
     // The token exchange retrieves it by code key.
     const fullCode = `${code}:${codeChallenge}`;
-    storeToken(code, token);
+    storeToken(db, code, token);
 
     const url = new URL(redirectUri);
     url.searchParams.set("code", fullCode);
@@ -344,9 +360,9 @@ export function createOAuthRoutes(agents: AgentService) {
       storedChallenge = code.substring(colonIdx + 1);
     }
 
-    const adminToken = process.env.MESH_ADMIN_TOKEN ?? "";
+    const oauthSecret = getOAuthSecret();
 
-    const valid = verifyCode(actualCode, adminToken);
+    const valid = verifyCode(actualCode, oauthSecret);
     if (!valid) {
       return c.json(
         {
@@ -389,13 +405,23 @@ export function createOAuthRoutes(agents: AgentService) {
       );
     }
 
-    // Retrieve the user's token from in-memory store (stored during authorize step)
+    // Retrieve the user's token from SQLite store (stored during authorize step)
     // SECURITY: Token is never exposed in URLs — only stored server-side.
-    const storedToken = retrieveToken(actualCode);
-    const accessToken = storedToken ?? adminToken;
+    // SECURITY: No fallback — if the token is gone, the exchange fails.
+    const storedToken = retrieveToken(db, actualCode);
+    if (!storedToken) {
+      return c.json(
+        {
+          error: "invalid_grant",
+          error_description:
+            "Token exchange failed — authorization may have expired or been consumed. Please re-authorize.",
+        },
+        400,
+      );
+    }
 
     return c.json({
-      access_token: accessToken,
+      access_token: storedToken,
       token_type: "Bearer",
       expires_in: 2592000, // 30 days
     });
