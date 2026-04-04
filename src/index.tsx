@@ -163,7 +163,7 @@ app.get("/avatars/:file", async (c) => {
       filePath = join(currentDir, "../../public/avatars", file);
     }
     const data = await readFile(filePath);
-    return new Response(data, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
+    return new Response(data, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" } });
   } catch {
     return c.text("Not found", 404);
   }
