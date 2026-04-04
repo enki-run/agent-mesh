@@ -117,6 +117,8 @@ export const ConversationsPage: FC<ConversationsPageProps> = ({
                 <summary
                   style="padding: 0.77rem 1rem; cursor: pointer; display: flex; align-items: center; gap: 0.62rem; flex-wrap: wrap; list-style: none; user-select: none;"
                 >
+                  {/* Expand indicator */}
+                  <span style="font-size: 0.69rem; color: var(--color-subtle); flex-shrink: 0; transition: transform 0.12s;">&#9654;</span>
                   {/* Participant avatars */}
                   <div style="display: flex; flex-shrink: 0;">
                     {thread.participants.map((name, i) => {
@@ -125,6 +127,7 @@ export const ConversationsPage: FC<ConversationsPageProps> = ({
                       return avSrc ? (
                         <img
                           src={avSrc}
+                          alt=""
                           title={name}
                           style={`width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 2px solid var(--color-surface);${i > 0 ? " margin-left: -8px;" : ""}`}
                         />
@@ -174,6 +177,7 @@ export const ConversationsPage: FC<ConversationsPageProps> = ({
                           {avSrc && (
                             <img
                               src={avSrc}
+                              alt=""
                               style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover;"
                             />
                           )}
@@ -222,12 +226,12 @@ export const ConversationsPage: FC<ConversationsPageProps> = ({
             <span style="color: var(--color-ghost);">&#8592; Neuere</span>
           )}
           <span class="current">
-            {offset + 1}&ndash;{Math.min(offset + limit, total)} von {total}
+            {offset + 1}–{Math.min(offset + limit, total)} von {total}
           </span>
           {has_more ? (
-            <a href={pageUrl(nextOffset)}>&Auml;ltere &#8594;</a>
+            <a href={pageUrl(nextOffset)}>Ältere &#8594;</a>
           ) : (
-            <span style="color: var(--color-ghost);">&Auml;ltere &#8594;</span>
+            <span style="color: var(--color-ghost);">Ältere &#8594;</span>
           )}
         </div>
       )}

@@ -745,17 +745,12 @@ app.get("/conversations", (c) => {
 
   const result = listConversations({ limit, offset });
 
-  const agentAvatars: Record<string, string> = {};
-  for (const a of agents.list()) {
-    if (a.avatar) agentAvatars[a.name] = a.avatar;
-  }
-
   return c.html(
     <ConversationsPage
       result={result}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={agentAvatars}
+      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
