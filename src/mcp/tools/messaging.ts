@@ -10,8 +10,8 @@ import { MESSAGE_PRIORITIES } from "../../types.ts";
 import {
   createMessage,
   isMessageExpired,
-  serializeMessage,
   deserializeMessage,
+  sendAndPersistMessage,
 } from "../../services/message.ts";
 import { log } from "../../services/logger.ts";
 
@@ -81,43 +81,18 @@ export function registerMessagingTools(
         ttl_seconds: params.ttl_seconds,
       });
 
-      // Store in SQLite
-      db.prepare(
-        `INSERT INTO messages (id, from_agent, to_agent, type, payload, context, correlation_id, reply_to, priority, ttl_seconds, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        msg.id,
-        msg.from,
-        msg.to,
-        msg.type,
-        msg.payload,
-        msg.context,
-        msg.correlation_id,
-        msg.reply_to,
-        msg.priority,
-        msg.ttl_seconds,
-        msg.created_at,
-      );
-
-      // Publish to NATS (lowercase subject for case-insensitive routing)
-      // C4: NATS may be transiently unavailable. If publish fails, the
-      // message is already persisted in SQLite — we log loudly and return
-      // an error so the caller knows delivery is not confirmed.
+      // Dual-write: NATS first (delivery), DB second (history).
+      // See Mesh-ADR-006. If NATS publish fails nothing is written to the
+      // DB — no phantom-send. If the DB insert fails after NATS succeeds
+      // the message is still delivered and we loud-log the history gap.
       const subject =
         params.to === "broadcast"
           ? "mesh.broadcast"
           : `mesh.agents.${params.to.toLowerCase()}.inbox`;
-      try {
-        await nats.publish(subject, serializeMessage(msg), msg.id);
-      } catch (err) {
-        log("error", "nats publish failed in mesh_send", {
-          msg_id: msg.id,
-          from: agentName,
-          to: params.to,
-          err: String(err),
-        });
+      const result = await sendAndPersistMessage(nats, db, msg, subject);
+      if (!result.delivered) {
         return error(
-          `nats_unavailable: message stored in history but not delivered. Retry in a few seconds.`,
+          `nats_unavailable: message not delivered. Retry in a few seconds.`,
         );
       }
 
@@ -269,39 +244,13 @@ export function registerMessagingTools(
         reply_to: params.message_id,
       });
 
-      // Store in SQLite
-      db.prepare(
-        `INSERT INTO messages (id, from_agent, to_agent, type, payload, context, correlation_id, reply_to, priority, ttl_seconds, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        msg.id,
-        msg.from,
-        msg.to,
-        msg.type,
-        msg.payload,
-        msg.context,
-        msg.correlation_id,
-        msg.reply_to,
-        msg.priority,
-        msg.ttl_seconds,
-        msg.created_at,
-      );
-
-      // Publish to NATS (lowercase for case-insensitive routing)
-      // C4: Same reliability semantics as mesh_send — the reply is already
-      // in SQLite, we log + return an error if NATS publish fails.
+      // Dual-write: NATS first (delivery), DB second (history).
+      // Same reliability semantics as mesh_send — see Mesh-ADR-006.
       const subject = `mesh.agents.${original.from_agent.toLowerCase()}.inbox`;
-      try {
-        await nats.publish(subject, serializeMessage(msg), msg.id);
-      } catch (err) {
-        log("error", "nats publish failed in mesh_reply", {
-          msg_id: msg.id,
-          reply_to: params.message_id,
-          to: original.from_agent,
-          err: String(err),
-        });
+      const result = await sendAndPersistMessage(nats, db, msg, subject);
+      if (!result.delivered) {
         return error(
-          `nats_unavailable: reply stored in history but not delivered. Retry in a few seconds.`,
+          `nats_unavailable: reply not delivered. Retry in a few seconds.`,
         );
       }
 
