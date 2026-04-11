@@ -258,6 +258,19 @@ function listConversations(params: { limit: number; offset: number }) {
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
+// --- Global error handler (C5) ---
+// Catches any uncaught error in a route handler, logs it as structured
+// JSON, and returns a generic 500 so we never leak stack traces to clients.
+app.onError((err, c) => {
+  log("error", "hono request error", {
+    path: c.req.path,
+    method: c.req.method,
+    err: err.message,
+    stack: err.stack,
+  });
+  return c.json({ error: "internal server error" }, 500);
+});
+
 // --- Inject env bindings from validated config ---
 // The Env interface is kept for compatibility with existing middleware,
 // but values come from the validated config, not raw process.env.
@@ -433,7 +446,12 @@ app.all("/mcp", async (c) => {
   try {
     const response = await transport.handleRequest(c.req.raw);
     return response;
-  } catch {
+  } catch (err) {
+    log("error", "mcp request failed", {
+      agent: agentName,
+      err: String(err),
+      stack: (err as Error)?.stack,
+    });
     return c.json(
       {
         jsonrpc: "2.0",
@@ -775,6 +793,28 @@ app.get("/conversations", (c) => {
 
 // --- OAuth routes ---
 app.route("/", createOAuthRoutes(agents, db));
+
+// --- Process-level error handlers (C5) ---
+// Prevent a single unhandled async rejection from crashing the process.
+// Structured log entries make post-incident debugging in Coolify possible.
+process.on("unhandledRejection", (reason) => {
+  log("error", "unhandled rejection", {
+    reason: String(reason),
+    stack: (reason as Error)?.stack,
+  });
+  // Don't exit — a stray rejection shouldn't take down the whole server.
+  // Coolify will restart us if /health starts failing.
+});
+
+process.on("uncaughtException", (err) => {
+  log("fatal", "uncaught exception", {
+    err: err.message,
+    stack: err.stack,
+  });
+  // An uncaught exception means the process is in an unknown state.
+  // Exit and let Coolify restart — safer than continuing.
+  process.exit(1);
+});
 
 // --- Start server + graceful shutdown ---
 async function start() {
