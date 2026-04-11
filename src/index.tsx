@@ -20,6 +20,8 @@ import { createMcpServer } from "./mcp/server.js";
 import { createOAuthRoutes, cleanupExpiredOAuthTokens } from "./oauth.js";
 import { RATE_LIMIT_PER_MINUTE, VERSION, LIMITS, MESSAGE_RETENTION_DAYS, ACTIVITY_RETENTION_DAYS } from "./types.js";
 import type { Env, AppVariables, MessagePriority } from "./types.js";
+import { loadConfig, isConfigError } from "./config.js";
+import { log } from "./services/logger.js";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
@@ -29,10 +31,24 @@ import { MessagesPage } from "./views/messages.js";
 import { ActivityPage } from "./views/activity.js";
 import { ConversationsPage } from "./views/conversations.js";
 
+// --- Load and validate configuration (fail-fast on missing/invalid secrets) ---
+// Closes code-review findings C2 (empty MESH_ADMIN_TOKEN bypass) and C3
+// (OAuth/Cookie secret fallback chain). See src/config.ts for validation rules.
+const configResult = loadConfig();
+if (isConfigError(configResult)) {
+  log("fatal", "configuration validation failed", { errors: configResult.errors });
+  console.error("\nFATAL: env validation failed:");
+  for (const e of configResult.errors) {
+    console.error("  - " + e);
+  }
+  console.error("\nSee .env.example for the required variables.");
+  process.exit(1);
+}
+const config = configResult;
+
 // --- Initialize services ---
-const dbPath = process.env.DATABASE_PATH || "./mesh.db";
-const db = initDatabase(dbPath);
-const nats = new NatsService(process.env.NATS_URL || "nats://localhost:4222");
+const db = initDatabase(config.databasePath);
+const nats = new NatsService(config.natsUrl);
 const activity = new ActivityService(db);
 const agents = new AgentService(db, activity);
 const rateLimiter = new RateLimiter(RATE_LIMIT_PER_MINUTE);
@@ -242,15 +258,17 @@ function listConversations(params: { limit: number; offset: number }) {
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
-// --- Inject env bindings from process.env ---
+// --- Inject env bindings from validated config ---
+// The Env interface is kept for compatibility with existing middleware,
+// but values come from the validated config, not raw process.env.
 app.use("*", async (c, next) => {
   c.env = {
-    NATS_URL: process.env.NATS_URL || "nats://localhost:4222",
-    MESH_ADMIN_TOKEN: process.env.MESH_ADMIN_TOKEN || "",
-    MESH_ADMIN_TOKEN_PREVIOUS: process.env.MESH_ADMIN_TOKEN_PREVIOUS,
-    MESH_COOKIE_SECRET: process.env.MESH_COOKIE_SECRET,
-    OAUTH_SECRET: process.env.OAUTH_SECRET,
-    DATABASE_PATH: process.env.DATABASE_PATH,
+    NATS_URL: config.natsUrl,
+    MESH_ADMIN_TOKEN: config.meshAdminToken,
+    MESH_ADMIN_TOKEN_PREVIOUS: config.meshAdminTokenPrevious,
+    MESH_COOKIE_SECRET: config.meshCookieSecret || undefined,
+    OAUTH_SECRET: config.oauthSecret || undefined,
+    DATABASE_PATH: config.databasePath,
   };
   await next();
 });
@@ -763,23 +781,29 @@ async function start() {
   // Rotate old data on startup
   const oauthCleaned = cleanupExpiredOAuthTokens(db);
   if (oauthCleaned > 0) {
-    console.log(`Cleaned up ${oauthCleaned} expired OAuth tokens`);
+    log("info", "cleaned up expired oauth tokens", { count: oauthCleaned });
   }
   const msgRotated = activity.rotateMessages(MESSAGE_RETENTION_DAYS);
   const actRotated = activity.rotate(ACTIVITY_RETENTION_DAYS);
   if (msgRotated > 0 || actRotated > 0) {
-    console.log(`Rotated: ${msgRotated} messages, ${actRotated} activity entries`);
+    log("info", "rotated retention tables", {
+      messages: msgRotated,
+      activity_entries: actRotated,
+    });
   }
 
   await nats.connect();
-  console.log("Connected to NATS");
+  log("info", "nats connected", { url: config.natsUrl });
 
-  const port = parseInt(process.env.PORT || "3000", 10);
-  const server = serve({ fetch: app.fetch, port });
-  console.log(`Agent Mesh v${VERSION} listening on :${port}`);
+  const server = serve({ fetch: app.fetch, port: config.port });
+  log("info", "agent-mesh listening", {
+    version: VERSION,
+    port: config.port,
+    production: config.isProduction,
+  });
 
   const shutdown = async () => {
-    console.log("Shutting down...");
+    log("info", "shutting down");
     server.close();
     await nats.close();
     db.close();
@@ -791,6 +815,6 @@ async function start() {
 }
 
 start().catch((err) => {
-  console.error("Failed to start:", err);
+  log("fatal", "failed to start", { err: String(err), stack: (err as Error)?.stack });
   process.exit(1);
 });
