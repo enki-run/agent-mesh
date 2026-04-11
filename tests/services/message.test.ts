@@ -100,6 +100,47 @@ describe("Message Service", () => {
     expect(isMessageExpired(msg)).toBe(false);
   });
 
+  it("is not expired exactly at the deadline (>=, not >)", () => {
+    const msg = createMessage({
+      from: "a",
+      to: "b",
+      type: "info",
+      payload: "hi",
+      context: "test",
+      ttl_seconds: 60,
+    });
+    // Force created_at to exactly "60 seconds ago" — expiry boundary
+    msg.created_at = new Date(Date.now() - 60_000).toISOString();
+    expect(isMessageExpired(msg)).toBe(false);
+  });
+
+  it("is expired 1ms past the deadline", () => {
+    const msg = createMessage({
+      from: "a",
+      to: "b",
+      type: "info",
+      payload: "hi",
+      context: "test",
+      ttl_seconds: 60,
+    });
+    msg.created_at = new Date(Date.now() - 60_001).toISOString();
+    expect(isMessageExpired(msg)).toBe(true);
+  });
+
+  it("is expired when ttl_seconds is 0 and created_at is in the past", () => {
+    const msg = createMessage({
+      from: "a",
+      to: "b",
+      type: "info",
+      payload: "hi",
+      context: "test",
+      ttl_seconds: 0,
+    });
+    // 1ms ago → ttl_seconds=0 means already expired
+    msg.created_at = new Date(Date.now() - 1).toISOString();
+    expect(isMessageExpired(msg)).toBe(true);
+  });
+
   it("serialization roundtrip preserves message", () => {
     const msg = createMessage({
       from: "agent-a",

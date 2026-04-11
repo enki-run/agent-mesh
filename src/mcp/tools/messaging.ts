@@ -47,7 +47,7 @@ export function registerMessagingTools(
       context: z.string().max(2048).describe("Your current project, task, and status (max 2048 chars) — REQUIRED for recipient to understand your situation"),
       correlation_id: z.string().optional().describe("Thread ID to continue an existing conversation"),
       priority: z.enum(MESSAGE_PRIORITIES).optional().describe("Message priority (low, normal, high)"),
-      ttl_seconds: z.number().optional().describe("Time-to-live in seconds (default: 86400 = 24h)"),
+      ttl_seconds: z.number().optional().describe("Delivery deadline in seconds (default: 86400 = 24h). After expiry, mesh_receive silently drops the message — but it remains in history until the 30-day DB rotation."),
     },
     async (params) => {
       // Rate limit check
