@@ -16,6 +16,34 @@ interface PresenceEntry {
   timestamp?: string;
 }
 
+/**
+ * Presence state of an agent, derived from NATS KV presence + SQLite last_seen_at.
+ *
+ * - `live`    — in NATS KV presence bucket (active within last 600s)
+ * - `stale`   — not in KV, but last_seen_at within the stale threshold (default 24h)
+ * - `offline` — last_seen_at older than stale threshold
+ * - `never`   — last_seen_at is null (agent created but never authenticated)
+ *
+ * Exported as a pure function so it can be unit-tested without a live NATS/DB.
+ */
+export type Presence = "live" | "stale" | "offline" | "never";
+
+export const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24h
+
+export function computePresence(
+  inPresenceKV: boolean,
+  lastSeenAt: string | null,
+  now: number = Date.now(),
+  staleThresholdMs: number = STALE_THRESHOLD_MS,
+): Presence {
+  if (inPresenceKV) return "live";
+  if (!lastSeenAt) return "never";
+  const lastSeenMs = Date.parse(lastSeenAt);
+  if (Number.isNaN(lastSeenMs)) return "never";
+  if (now - lastSeenMs < staleThresholdMs) return "stale";
+  return "offline";
+}
+
 export function registerRegistryTools(
   server: McpServer,
   nats: NatsService,
@@ -34,15 +62,22 @@ export function registerRegistryTools(
 
       const agentList = allAgents.map((agent) => {
         const p = presence.get(agent.name) as PresenceEntry | undefined;
+        const inPresenceKV = presence.has(agent.name);
+        // Prefer the NATS KV timestamp when the agent is live; otherwise
+        // fall back to the SQLite last_seen_at (which is touched by authMiddleware).
+        const effectiveLastSeen = p?.timestamp ?? agent.last_seen_at ?? null;
+        const presenceState = computePresence(inPresenceKV, effectiveLastSeen);
         return {
           name: agent.name,
           avatar: agent.avatar ?? null,
           role: p?.role ?? agent.role ?? null,
           capabilities: p?.capabilities ?? (agent.capabilities ? JSON.parse(agent.capabilities) : null),
           is_active: agent.is_active === 1,
-          online: presence.has(agent.name),
+          // `online` kept for backward compatibility — equivalent to presence === "live"
+          online: inPresenceKV,
+          presence: presenceState,
           working_on: p?.working_on ?? agent.working_on ?? null,
-          last_seen_at: p?.timestamp ?? agent.last_seen_at ?? null,
+          last_seen_at: effectiveLastSeen,
         };
       });
 
