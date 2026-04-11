@@ -20,9 +20,13 @@ import {
 import { createMcpServer } from "./mcp/server.js";
 import { createOAuthRoutes, cleanupExpiredOAuthTokens } from "./oauth.js";
 import { RATE_LIMIT_PER_MINUTE, VERSION, LIMITS, MESSAGE_RETENTION_DAYS, ACTIVITY_RETENTION_DAYS } from "./types.js";
-import type { Env, AppVariables, MessagePriority } from "./types.js";
+import type { Env, AppVariables } from "./types.js";
 import { loadConfig, isConfigError } from "./config.js";
 import { log } from "./services/logger.js";
+import { listMessages, listConversations } from "./services/message-queries.js";
+import { setFlash, getFlash } from "./services/flash.js";
+import { getHomeStats } from "./services/home-stats.js";
+import { checkHealth } from "./services/health.js";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
@@ -56,207 +60,6 @@ const activity = new ActivityService(db);
 // garbage-collect JetStream consumers when agents are revoked/deleted/renamed.
 const agents = new AgentService(db, activity, nats);
 const rateLimiter = new RateLimiter(RATE_LIMIT_PER_MINUTE);
-
-// --- In-memory flash store (UUID -> { data, expiresAt }) ---
-interface FlashEntry {
-  newToken?: string;
-  error?: string;
-  expiresAt: number;
-}
-const flashStore = new Map<string, FlashEntry>();
-const FLASH_TTL_MS = 60_000; // 60s
-
-function setFlash(data: Omit<FlashEntry, "expiresAt">): string {
-  const key = crypto.randomUUID();
-  flashStore.set(key, { ...data, expiresAt: Date.now() + FLASH_TTL_MS });
-  setTimeout(() => flashStore.delete(key), FLASH_TTL_MS + 1000);
-  return key;
-}
-
-function getFlash(key: string | undefined): Omit<FlashEntry, "expiresAt"> | null {
-  if (!key) return null;
-  const entry = flashStore.get(key);
-  if (!entry) return null;
-  if (Date.now() >= entry.expiresAt) {
-    flashStore.delete(key);
-    return null;
-  }
-  flashStore.delete(key);
-  const { expiresAt: _exp, ...data } = entry;
-  return data;
-}
-
-// --- DB row type for messages (column names differ from Message type) ---
-interface MessageRow {
-  id: string;
-  from_agent: string;
-  to_agent: string;
-  type: string;
-  payload: string;
-  context: string;
-  correlation_id: string | null;
-  reply_to: string | null;
-  priority: string;
-  ttl_seconds: number;
-  created_at: string;
-}
-
-function listMessages(params: { limit: number; offset: number; agent?: string }) {
-  const { limit, offset, agent } = params;
-  const conditions: string[] = [];
-  const bindings: unknown[] = [];
-
-  if (agent) {
-    conditions.push("(from_agent = ? COLLATE NOCASE OR to_agent = ? COLLATE NOCASE)");
-    bindings.push(agent, agent);
-  }
-
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-  const rows = db
-    .prepare(`SELECT * FROM messages${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-    .all(...bindings, limit, offset) as MessageRow[];
-
-  const countRow = db
-    .prepare(`SELECT COUNT(*) as total FROM messages${where}`)
-    .get(...bindings) as { total: number } | undefined;
-
-  const total = countRow?.total ?? 0;
-  const data = rows.map((row) => ({
-    id: row.id,
-    from: row.from_agent,
-    to: row.to_agent,
-    type: row.type,
-    payload: row.payload,
-    context: row.context,
-    correlation_id: row.correlation_id,
-    reply_to: row.reply_to,
-    priority: row.priority as MessagePriority,
-    ttl_seconds: row.ttl_seconds,
-    created_at: row.created_at,
-  }));
-
-  return {
-    data,
-    has_more: offset + data.length < total,
-    total,
-    limit,
-    offset,
-  };
-}
-
-// --- Conversation threading ---
-interface ThreadSummary {
-  thread_id: string;
-  started_at: string;
-  last_activity: string;
-  message_count: number;
-}
-
-interface ConversationThread {
-  thread_id: string;
-  started_at: string;
-  last_activity: string;
-  message_count: number;
-  first_payload: string;
-  first_context: string | null;
-  participants: string[];
-  messages: Array<{
-    id: string;
-    from: string;
-    to: string;
-    type: string;
-    payload: string;
-    context: string;
-    correlation_id: string | null;
-    reply_to: string | null;
-    priority: MessagePriority;
-    ttl_seconds: number;
-    created_at: string;
-  }>;
-}
-
-function listConversations(params: { limit: number; offset: number }) {
-  const { limit, offset } = params;
-
-  // Count total threads
-  const countRow = db
-    .prepare("SELECT COUNT(*) as total FROM (SELECT DISTINCT COALESCE(correlation_id, id) FROM messages)")
-    .get() as { total: number } | undefined;
-  const total = countRow?.total ?? 0;
-
-  // Get thread summaries (paginated)
-  const summaries = db
-    .prepare(
-      `SELECT
-        COALESCE(correlation_id, id) AS thread_id,
-        MIN(created_at) AS started_at,
-        MAX(created_at) AS last_activity,
-        COUNT(*) AS message_count
-      FROM messages
-      GROUP BY COALESCE(correlation_id, id)
-      ORDER BY MAX(created_at) DESC
-      LIMIT ? OFFSET ?`
-    )
-    .all(limit, offset) as ThreadSummary[];
-
-  if (summaries.length === 0) {
-    return { data: [] as ConversationThread[], has_more: false, total, limit, offset };
-  }
-
-  // Fetch all messages for visible threads
-  const placeholders = summaries.map(() => "?").join(",");
-  const threadIds = summaries.map((s) => s.thread_id);
-  const rows = db
-    .prepare(
-      `SELECT * FROM messages
-      WHERE COALESCE(correlation_id, id) IN (${placeholders})
-      ORDER BY created_at ASC`
-    )
-    .all(...threadIds) as MessageRow[];
-
-  // Group messages by thread
-  const messagesByThread = new Map<string, MessageRow[]>();
-  for (const row of rows) {
-    const tid = row.correlation_id ?? row.id;
-    if (!messagesByThread.has(tid)) messagesByThread.set(tid, []);
-    messagesByThread.get(tid)!.push(row);
-  }
-
-  // Build conversation threads
-  const data: ConversationThread[] = summaries.map((s) => {
-    const msgs = messagesByThread.get(s.thread_id) ?? [];
-    const participantSet = new Set<string>();
-    for (const m of msgs) {
-      participantSet.add(m.from_agent);
-      participantSet.add(m.to_agent);
-    }
-    const first = msgs[0];
-    return {
-      thread_id: s.thread_id,
-      started_at: s.started_at,
-      last_activity: s.last_activity,
-      message_count: s.message_count,
-      first_payload: first?.payload ?? "",
-      first_context: first?.context ?? null,
-      participants: Array.from(participantSet),
-      messages: msgs.map((row) => ({
-        id: row.id,
-        from: row.from_agent,
-        to: row.to_agent,
-        type: row.type,
-        payload: row.payload,
-        context: row.context,
-        correlation_id: row.correlation_id,
-        reply_to: row.reply_to,
-        priority: row.priority as MessagePriority,
-        ttl_seconds: row.ttl_seconds,
-        created_at: row.created_at,
-      })),
-    };
-  });
-
-  return { data, has_more: offset + data.length < total, total, limit, offset };
-}
 
 // --- Hono app ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
@@ -355,22 +158,10 @@ app.get("/avatars/:file", async (c) => {
 
 // --- Health endpoint (no auth) ---
 app.get("/health", async (c) => {
-  const natsOk = await nats.ping();
-  let dbOk = false;
-  try {
-    db.prepare("SELECT 1").get();
-    dbOk = true;
-  } catch {
-    // DB not accessible
-  }
-  const ok = natsOk && dbOk;
+  const h = await checkHealth(db, nats);
   return c.json(
-    {
-      status: ok ? "ok" : "degraded",
-      nats: natsOk ? "connected" : "disconnected",
-      db: dbOk ? "ok" : "error",
-    },
-    ok ? 200 : 503,
+    { status: h.status, nats: h.nats, db: h.db },
+    h.httpStatus,
   );
 });
 
@@ -514,26 +305,13 @@ app.get("/", (c) => {
   const agent = c.get("agent");
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
 
-  const totalAgentsRow = db.prepare("SELECT COUNT(*) as count FROM agents").get() as { count: number };
-  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const onlineAgentsRow = db
-    .prepare("SELECT COUNT(*) as count FROM agents WHERE is_active = 1 AND last_seen_at > ?")
-    .get(tenMinAgo) as { count: number };
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const recentMessagesRow = db
-    .prepare("SELECT COUNT(*) as count FROM messages WHERE created_at > ?")
-    .get(dayAgo) as { count: number };
-
+  const stats = getHomeStats(db);
   const activityResult = activity.list({ limit: 5, offset: 0 });
   const allAgents = agents.list();
 
   return c.html(
     <HomePage
-      stats={{
-        totalAgents: totalAgentsRow.count,
-        onlineAgents: onlineAgentsRow.count,
-        recentMessages: recentMessagesRow.count,
-      }}
+      stats={stats}
       activities={activityResult.data}
       agents={allAgents}
       userRole={agent?.role ?? undefined}
@@ -545,25 +323,12 @@ app.get("/", (c) => {
 
 // --- Dashboard: Home JSON (for polling) ---
 app.get("/api/home", (c) => {
-  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const totalAgentsRow = db.prepare("SELECT COUNT(*) as count FROM agents").get() as { count: number };
-  const onlineAgentsRow = db
-    .prepare("SELECT COUNT(*) as count FROM agents WHERE is_active = 1 AND last_seen_at > ?")
-    .get(tenMinAgo) as { count: number };
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const recentMessagesRow = db
-    .prepare("SELECT COUNT(*) as count FROM messages WHERE created_at > ?")
-    .get(dayAgo) as { count: number };
-
+  const stats = getHomeStats(db);
   const allAgents = agents.list();
   const activityResult = activity.list({ limit: 5, offset: 0 });
 
   return c.json({
-    stats: {
-      totalAgents: totalAgentsRow.count,
-      onlineAgents: onlineAgentsRow.count,
-      recentMessages: recentMessagesRow.count,
-    },
+    stats,
     agents: allAgents.map((a) => ({
       name: a.name,
       role: a.role,
@@ -768,7 +533,7 @@ app.get("/messages", (c) => {
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
   const limit = LIMITS.PAGINATION_DEFAULT;
 
-  const result = listMessages({ limit, offset, agent: filterAgent });
+  const result = listMessages(db, { limit, offset, agent: filterAgent });
 
   // Build agent name -> avatar map
   const agentAvatars: Record<string, string> = {};
@@ -817,7 +582,7 @@ app.get("/conversations", (c) => {
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
   const limit = LIMITS.PAGINATION_DEFAULT;
 
-  const result = listConversations({ limit, offset });
+  const result = listConversations(db, { limit, offset });
 
   return c.html(
     <ConversationsPage
