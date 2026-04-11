@@ -300,40 +300,4 @@ export class AgentService {
     return { plaintextToken };
   }
 
-  updatePresence(
-    name: string,
-    fields: { role?: string; capabilities?: string; working_on?: string },
-  ): boolean {
-    const now = new Date().toISOString();
-    const sets: string[] = ["last_seen_at = ?", "updated_at = ?"];
-    const bindings: unknown[] = [now, now];
-
-    if (fields.role !== undefined) {
-      sets.push("role = ?");
-      bindings.push(fields.role);
-    }
-    if (fields.capabilities !== undefined) {
-      sets.push("capabilities = ?");
-      bindings.push(fields.capabilities);
-    }
-    if (fields.working_on !== undefined) {
-      sets.push("working_on = ?");
-      bindings.push(fields.working_on);
-    }
-
-    bindings.push(name);
-
-    const result = this.db
-      .prepare(
-        `UPDATE agents SET ${sets.join(", ")} WHERE name = ? COLLATE NOCASE`,
-      )
-      .run(...bindings);
-
-    if (result.changes > 0) {
-      clearTokenCache();
-      return true;
-    }
-
-    return false;
-  }
 }

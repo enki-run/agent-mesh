@@ -3,39 +3,11 @@ import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
 import type { PresenceService } from "../../services/presence.ts";
-import {
-  computePresenceState,
-  PRESENCE_THRESHOLDS,
-  type Presence,
-} from "../../services/presence.ts";
 
 function ok(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
   };
-}
-
-// ─── Backward-compat re-exports ──────────────────────────────────────
-// These shims keep existing imports working while call sites migrate to
-// `src/services/presence.ts`. Removed in the final cleanup commit of
-// the presence-service refactor.
-
-/** @deprecated Import from `src/services/presence.ts` instead. */
-export type { Presence };
-
-/** @deprecated Import `PRESENCE_THRESHOLDS.staleMs` from `src/services/presence.ts`. */
-export const STALE_THRESHOLD_MS = PRESENCE_THRESHOLDS.staleMs;
-
-/** @deprecated Use `computePresenceState` from `src/services/presence.ts`. */
-export function computePresence(
-  inPresenceKV: boolean,
-  lastSeenAt: string | null,
-  now: number = Date.now(),
-  staleThresholdMs: number = PRESENCE_THRESHOLDS.staleMs,
-): Presence {
-  return computePresenceState(inPresenceKV, lastSeenAt, now, {
-    staleMs: staleThresholdMs,
-  });
 }
 
 export function registerRegistryTools(
