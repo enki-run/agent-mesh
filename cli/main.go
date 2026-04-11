@@ -215,10 +215,10 @@ func cmdSend(url, token string, args []string) {
 		os.Exit(1)
 	}
 
-	// Warn if payload is large
+	// Warn if payload is approaching the 256 KB limit (>240 KB)
 	payloadBytes := len([]byte(payload))
-	if payloadBytes > 60000 {
-		fmt.Fprintf(os.Stderr, "Warnung: Payload ist %d KB (Limit: 64 KB)\n", payloadBytes/1024)
+	if payloadBytes > 245760 {
+		fmt.Fprintf(os.Stderr, "Warnung: Payload ist %d KB (Limit: 256 KB)\n", payloadBytes/1024)
 	}
 
 	params := map[string]any{
@@ -624,21 +624,9 @@ func color(code, text string) string {
 	return code + text + "\033[0m"
 }
 
-func isTTY() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-func stdinHasData() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice == 0
-}
+// isTTY and stdinHasData are defined in tty_unix.go / tty_windows.go
+// so we can keep the main CLI stdlib-only while still giving Windows
+// users sensible behavior (no raw ANSI escape sequences in cmd.exe).
 
 func hint(msg string) {
 	fmt.Fprintf(os.Stderr, "  → %s\n", msg)

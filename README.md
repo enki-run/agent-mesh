@@ -138,9 +138,29 @@ mesh-cli get msg_01ABC... | python3        # Python ausfuehren
 
 ```bash
 cd cli
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o mesh-cli-linux-amd64 .
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-linux-arm64 .
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-darwin-arm64 .
+CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o mesh-cli-linux-amd64 .
+CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-linux-arm64 .
+CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-darwin-arm64 .
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o mesh-cli-windows-amd64.exe .
+CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o mesh-cli-windows-arm64.exe .
+```
+
+**Windows:** ANSI colors are only enabled when `WT_SESSION` (Windows Terminal)
+or `ANSICON` (ConEmu) is set. In legacy `cmd.exe` the CLI falls back to plain
+text — launch from Windows Terminal or PowerShell 7+ for colored output.
+
+Environment setup:
+
+```powershell
+# PowerShell
+$env:MESH_TOKEN = "bt_your_token"
+.\mesh-cli-windows-amd64.exe status
+```
+
+```cmd
+:: cmd.exe
+set MESH_TOKEN=bt_your_token
+mesh-cli-windows-amd64.exe status
 ```
 
 ## Limits
