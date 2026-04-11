@@ -3,6 +3,9 @@ dist/
 *.db
 .env
 
+# Local dev overrides (publishes mesh port to host, etc.)
+docker-compose.override.yml
+
 # CLI binaries
 cli/mesh-cli
 cli/mesh-cli-*
