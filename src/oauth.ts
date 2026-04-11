@@ -16,14 +16,14 @@ const CODE_EXPIRY_MS = 300_000; // 5 minutes
 
 // --- SQLite-backed token store (survives container restarts) ---
 
-function storeToken(db: Database.Database, code: string, token: string): void {
+export function storeToken(db: Database.Database, code: string, token: string): void {
   const expiresAt = Date.now() + CODE_EXPIRY_MS;
   db.prepare(
     "INSERT OR REPLACE INTO oauth_tokens (code, token, expires_at) VALUES (?, ?, ?)",
   ).run(code, token, expiresAt);
 }
 
-function retrieveToken(db: Database.Database, code: string): string | null {
+export function retrieveToken(db: Database.Database, code: string): string | null {
   const row = db
     .prepare("SELECT token, expires_at FROM oauth_tokens WHERE code = ?")
     .get(code) as { token: string; expires_at: number } | undefined;
@@ -46,7 +46,7 @@ export function cleanupExpiredOAuthTokens(db: Database.Database): number {
 
 // --- Redirect URI validation ---
 // Only allow localhost/loopback origins (MCP clients run locally)
-function isAllowedRedirectUri(uri: string): boolean {
+export function isAllowedRedirectUri(uri: string): boolean {
   try {
     const url = new URL(uri);
     if (url.protocol !== "http:" && url.protocol !== "https:") return false;
@@ -81,13 +81,13 @@ function hmacSign(data: string, secret: string): string {
 }
 
 // --- Stateless authorization code: timestamp.sig ---
-function generateCode(secret: string): string {
+export function generateCode(secret: string): string {
   const timestamp = Date.now().toString();
   const sig = hmacSign(`code:${timestamp}`, secret);
   return `${timestamp}.${sig}`;
 }
 
-function verifyCode(code: string, secret: string): boolean {
+export function verifyCode(code: string, secret: string): boolean {
   const parts = code.split(".");
   if (parts.length !== 2) return false;
   const [timestamp, sig] = parts;
