@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { Hono } from "hono";
+import { z } from "zod";
 import type Database from "better-sqlite3";
 import { hashToken, timingSafeEqual, getCookieSecret } from "./auth.js";
 import type { AgentService } from "./services/agent.js";
@@ -13,6 +14,16 @@ import type { Env, AppVariables } from "./types.js";
 
 const OAUTH_CLIENT_ID = "agent-mesh-mcp-client";
 const CODE_EXPIRY_MS = 300_000; // 5 minutes
+
+// RFC 7591 Dynamic Client Registration request schema.
+// We accept extra fields via .passthrough() — the spec allows arbitrary
+// metadata — but enforce strict limits on the fields we actually use.
+const registerClientSchema = z
+  .object({
+    client_name: z.string().max(256).optional(),
+    redirect_uris: z.array(z.string().url()).max(10).optional(),
+  })
+  .passthrough();
 
 // --- SQLite-backed token store (survives container restarts) ---
 
@@ -197,17 +208,52 @@ export function createOAuthRoutes(agents: AgentService, db: Database.Database) {
     });
   });
 
-  // Dynamic Client Registration (MCP spec requires this)
+  // Dynamic Client Registration (RFC 7591, MCP spec requires this)
+  // SECURITY (C6): Validate input with Zod. An unbounded `await c.req.json()`
+  // with no schema allowed trivial DoS via oversized payloads
+  // (e.g. `{"client_name": "A".repeat(10_000_000)}`).
   // SECURITY: Never return real tokens — client_secret is a placeholder.
   // Users authenticate via the /oauth/authorize form with their personal token.
   oauth.post("/oauth/register", async (c) => {
-    const body = await c.req.json();
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json(
+        { error: "invalid_request", error_description: "Body must be valid JSON" },
+        400,
+      );
+    }
+    const parsed = registerClientSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: "invalid_request",
+          error_description: parsed.error.issues
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; "),
+        },
+        400,
+      );
+    }
+    // Validate every redirect_uri against our localhost-only allowlist.
+    for (const uri of parsed.data.redirect_uris ?? []) {
+      if (!isAllowedRedirectUri(uri)) {
+        return c.json(
+          {
+            error: "invalid_redirect_uri",
+            error_description: `redirect_uri must be localhost/loopback (got: ${uri})`,
+          },
+          400,
+        );
+      }
+    }
     return c.json(
       {
         client_id: OAUTH_CLIENT_ID,
         client_secret: OAUTH_CLIENT_ID,
-        client_name: body.client_name || "MCP Client",
-        redirect_uris: body.redirect_uris || [],
+        client_name: parsed.data.client_name ?? "MCP Client",
+        redirect_uris: parsed.data.redirect_uris ?? [],
       },
       201,
     );

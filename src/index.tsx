@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { initDatabase } from "./services/db.js";
@@ -285,6 +286,40 @@ app.use("*", async (c, next) => {
   };
   await next();
 });
+
+// --- Body-size limits (C6) ---
+// Cap request body sizes by route-group to prevent OOM DoS. Numbers
+// chosen just above the legitimate max for each path. Anything larger
+// returns a 413 before the handler even parses the body.
+const smallFormLimit = bodyLimit({
+  maxSize: 4 * 1024, // 4 KB — login/agent CRUD forms
+  onError: (c) => c.json({ error: "body_too_large" }, 413),
+});
+app.use("/login", smallFormLimit);
+app.use("/logout", smallFormLimit);
+app.use("/agents/*", smallFormLimit);
+app.use(
+  "/oauth/*",
+  bodyLimit({
+    maxSize: 16 * 1024, // 16 KB — RFC 7591 register + authorize forms
+    onError: (c) => c.json({ error: "body_too_large" }, 413),
+  }),
+);
+app.use(
+  "/mcp",
+  bodyLimit({
+    maxSize: 512 * 1024, // 512 KB — 256 KB payload + JSON-RPC envelope + headroom
+    onError: (c) =>
+      c.json(
+        {
+          jsonrpc: "2.0",
+          error: { code: -32600, message: "Request body too large (max 512 KB)" },
+          id: null,
+        },
+        413,
+      ),
+  }),
+);
 
 // --- Security headers ---
 app.use("*", async (c, next) => {
