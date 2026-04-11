@@ -27,6 +27,7 @@ import { listMessages, listConversations } from "./services/message-queries.js";
 import { setFlash, getFlash } from "./services/flash.js";
 import { getHomeStats } from "./services/home-stats.js";
 import { checkHealth } from "./services/health.js";
+import { PresenceService } from "./services/presence.js";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
@@ -60,6 +61,9 @@ const activity = new ActivityService(db);
 // garbage-collect JetStream consumers when agents are revoked/deleted/renamed.
 const agents = new AgentService(db, activity, nats);
 const rateLimiter = new RateLimiter(RATE_LIMIT_PER_MINUTE);
+// Presence: single write-path (touch) + single read-path (list/countByState).
+// Wired into authMiddleware and every MCP tool that needs agent presence.
+const presence = new PresenceService(db, nats);
 
 // --- Hono app ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
@@ -216,7 +220,7 @@ app.post("/login", async (c) => {
 });
 
 // --- Auth middleware on all other routes ---
-app.use("*", authMiddleware(agents, nats, activity));
+app.use("*", authMiddleware(agents, presence, activity));
 
 // --- Logout ---
 app.post("/logout", (c) => {
@@ -261,6 +265,7 @@ app.all("/mcp", async (c) => {
     agents,
     activity,
     rateLimiter,
+    presence,
     agentName,
     db,
   );
@@ -301,48 +306,63 @@ function cookieSecretFor(env: Env): string {
 }
 
 // --- Dashboard: Home ---
-app.get("/", (c) => {
+app.get("/", async (c) => {
   const agent = c.get("agent");
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
 
-  const stats = getHomeStats(db);
+  const [stats, presenceEntries] = await Promise.all([
+    getHomeStats(db, presence),
+    presence.list(),
+  ]);
   const activityResult = activity.list({ limit: 5, offset: 0 });
-  const allAgents = agents.list();
+
+  // Decorate each agent with its computed presence state so the view
+  // renders "live" vs "stale/offline/never" consistently with mesh_status.
+  const agentsForView = presenceEntries.map((e) => ({
+    ...e.agent,
+    presence: e.presence,
+    role: e.liveMeta?.role ?? e.agent.role,
+    working_on: e.liveMeta?.working_on ?? e.agent.working_on,
+    last_seen_at: e.effectiveLastSeen,
+  }));
 
   return c.html(
     <HomePage
       stats={stats}
       activities={activityResult.data}
-      agents={allAgents}
+      agents={agentsForView}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(allAgents.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
+      agentAvatars={Object.fromEntries(agentsForView.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
 
 // --- Dashboard: Home JSON (for polling) ---
-app.get("/api/home", (c) => {
-  const stats = getHomeStats(db);
-  const allAgents = agents.list();
+app.get("/api/home", async (c) => {
+  const [stats, presenceEntries] = await Promise.all([
+    getHomeStats(db, presence),
+    presence.list(),
+  ]);
   const activityResult = activity.list({ limit: 5, offset: 0 });
 
   return c.json({
     stats,
-    agents: allAgents.map((a) => ({
-      name: a.name,
-      role: a.role,
-      avatar: a.avatar,
-      working_on: a.working_on,
-      last_seen_at: a.last_seen_at,
-      is_active: a.is_active,
+    agents: presenceEntries.map((e) => ({
+      name: e.agent.name,
+      role: e.liveMeta?.role ?? e.agent.role,
+      avatar: e.agent.avatar,
+      working_on: e.liveMeta?.working_on ?? e.agent.working_on,
+      last_seen_at: e.effectiveLastSeen,
+      is_active: e.agent.is_active,
+      presence: e.presence,
     })),
     activities: activityResult.data,
   });
 });
 
 // --- Dashboard: Agents (admin only) ---
-app.get("/agents", (c) => {
+app.get("/agents", async (c) => {
   const agent = c.get("agent");
   if (agent?.role !== "admin") {
     return c.redirect("/");
@@ -352,9 +372,18 @@ app.get("/agents", (c) => {
   const flashKey = c.req.query("flash");
   const flash = getFlash(flashKey);
 
+  // Same read-path as / and mesh_status: one presence.list() call per
+  // request so the admin table agrees with the rest of the dashboard.
+  const entries = await presence.list();
+  const agentsForView = entries.map((e) => ({
+    ...e.agent,
+    presence: e.presence,
+    last_seen_at: e.effectiveLastSeen,
+  }));
+
   return c.html(
     <AgentsPage
-      agents={agents.list()}
+      agents={agentsForView}
       csrfToken={csrfToken}
       newToken={flash?.newToken}
       error={flash?.error}

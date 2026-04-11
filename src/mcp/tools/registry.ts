@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
-import { log } from "../../services/logger.ts";
+import type { PresenceService } from "../../services/presence.ts";
 
 function ok(data: unknown) {
   return {
@@ -10,45 +10,11 @@ function ok(data: unknown) {
   };
 }
 
-interface PresenceEntry {
-  role?: string;
-  capabilities?: string[];
-  working_on?: string;
-  timestamp?: string;
-}
-
-/**
- * Presence state of an agent, derived from NATS KV presence + SQLite last_seen_at.
- *
- * - `live`    — in NATS KV presence bucket (active within last 600s)
- * - `stale`   — not in KV, but last_seen_at within the stale threshold (default 24h)
- * - `offline` — last_seen_at older than stale threshold
- * - `never`   — last_seen_at is null (agent created but never authenticated)
- *
- * Exported as a pure function so it can be unit-tested without a live NATS/DB.
- */
-export type Presence = "live" | "stale" | "offline" | "never";
-
-export const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24h
-
-export function computePresence(
-  inPresenceKV: boolean,
-  lastSeenAt: string | null,
-  now: number = Date.now(),
-  staleThresholdMs: number = STALE_THRESHOLD_MS,
-): Presence {
-  if (inPresenceKV) return "live";
-  if (!lastSeenAt) return "never";
-  const lastSeenMs = Date.parse(lastSeenAt);
-  if (Number.isNaN(lastSeenMs)) return "never";
-  if (now - lastSeenMs < staleThresholdMs) return "stale";
-  return "offline";
-}
-
 export function registerRegistryTools(
   server: McpServer,
   nats: NatsService,
   agents: AgentService,
+  presence: PresenceService,
   agentName: string,
 ): void {
   // ── mesh_status ───────────────────────────────────────────────
@@ -58,40 +24,24 @@ export function registerRegistryTools(
     {},
     { readOnlyHint: true },
     async () => {
-      const allAgents = agents.list();
-      // C4: If NATS is unavailable, degrade gracefully to DB-only presence.
-      // Agents still show up with their last_seen_at, just without the
-      // "live" KV signal — computePresence handles the empty Map correctly.
-      let presence: Map<string, unknown>;
-      try {
-        presence = await nats.getPresence();
-      } catch (err) {
-        log("warn", "nats presence read failed in mesh_status", {
-          err: String(err),
-        });
-        presence = new Map();
-      }
-
-      const agentList = allAgents.map((agent) => {
-        const p = presence.get(agent.name) as PresenceEntry | undefined;
-        const inPresenceKV = presence.has(agent.name);
-        // Prefer the NATS KV timestamp when the agent is live; otherwise
-        // fall back to the SQLite last_seen_at (which is touched by authMiddleware).
-        const effectiveLastSeen = p?.timestamp ?? agent.last_seen_at ?? null;
-        const presenceState = computePresence(inPresenceKV, effectiveLastSeen);
-        return {
-          name: agent.name,
-          avatar: agent.avatar ?? null,
-          role: p?.role ?? agent.role ?? null,
-          capabilities: p?.capabilities ?? (agent.capabilities ? JSON.parse(agent.capabilities) : null),
-          is_active: agent.is_active === 1,
-          // `online` kept for backward compatibility — equivalent to presence === "live"
-          online: inPresenceKV,
-          presence: presenceState,
-          working_on: p?.working_on ?? agent.working_on ?? null,
-          last_seen_at: effectiveLastSeen,
-        };
-      });
+      // Single read-path: PresenceService.list() joins SQLite + NATS KV
+      // and runs the 4-state calculation. C4 graceful degradation on
+      // NATS failure is handled inside the service.
+      const entries = await presence.list();
+      const agentList = entries.map((e) => ({
+        name: e.agent.name,
+        avatar: e.agent.avatar ?? null,
+        role: e.liveMeta?.role ?? e.agent.role ?? null,
+        capabilities:
+          e.liveMeta?.capabilities ??
+          (e.agent.capabilities ? JSON.parse(e.agent.capabilities) : null),
+        is_active: e.agent.is_active === 1,
+        // `online` kept for backward compatibility — equivalent to presence === "live"
+        online: e.presence === "live",
+        presence: e.presence,
+        working_on: e.liveMeta?.working_on ?? e.agent.working_on ?? null,
+        last_seen_at: e.effectiveLastSeen,
+      }));
 
       return ok({ agents: agentList, count: agentList.length });
     },
@@ -107,27 +57,14 @@ export function registerRegistryTools(
       working_on: z.string().optional().describe("What you are currently working on"),
     },
     async (params) => {
-      // Update agent presence in DB
-      agents.updatePresence(agentName, {
+      // Single presence write-path: SQLite + NATS KV updated atomically
+      // (from the caller's perspective). NATS KV failures are logged
+      // internally by the service and never surface here.
+      await presence.touch(agentName, {
         role: params.role,
-        capabilities: params.capabilities ? JSON.stringify(params.capabilities) : undefined,
+        capabilities: params.capabilities,
         working_on: params.working_on,
       });
-
-      // Update NATS presence — best-effort. DB presence is already persisted
-      // above, so a NATS failure only loses the 10-minute "live" signal.
-      try {
-        await nats.updatePresence(agentName, {
-          role: params.role,
-          capabilities: params.capabilities,
-          working_on: params.working_on,
-        });
-      } catch (err) {
-        log("warn", "nats presence update failed in mesh_register", {
-          agent: agentName,
-          err: String(err),
-        });
-      }
 
       return ok({
         agent: agentName,

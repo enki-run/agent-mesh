@@ -56,18 +56,6 @@ describe("AgentService", () => {
     expect(found?.name).toBe("Agent-A");
   });
 
-  it("updates presence", () => {
-    const { agent } = agents.create("agent-a");
-    agents.updatePresence(agent.name, {
-      role: "developer",
-      working_on: "feature X",
-    });
-    const list = agents.list();
-    expect(list[0].role).toBe("developer");
-    expect(list[0].working_on).toBe("feature X");
-    expect(list[0].last_seen_at).toBeTruthy();
-  });
-
   it("reactivates with new token", () => {
     const { agent } = agents.create("agent-a");
     agents.revokeById(agent.id);

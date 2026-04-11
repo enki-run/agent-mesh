@@ -2,6 +2,7 @@ import type { FC } from "hono/jsx";
 import { raw } from "hono/html";
 import { Layout } from "./layout.js";
 import type { Activity, Agent } from "../types.js";
+import type { Presence } from "../services/presence.js";
 
 interface HomeStats {
   totalAgents: number;
@@ -9,10 +10,20 @@ interface HomeStats {
   recentMessages: number;
 }
 
+/**
+ * Agent row as rendered by the home page. Same shape as Agent (minus
+ * token_hash) plus the computed `presence` state from PresenceService.
+ * This replaces the old client-side `isOnline(last_seen_at)` heuristic
+ * with a server-derived truth that matches what `mesh_status` reports.
+ */
+export type AgentForHome = Omit<Agent, "token_hash"> & {
+  presence: Presence;
+};
+
 interface HomeProps {
   stats: HomeStats;
   activities: Activity[];
-  agents?: Omit<Agent, "token_hash">[];
+  agents?: AgentForHome[];
   userRole?: string;
   csrfToken?: string;
   agentAvatars?: Record<string, string>;
@@ -44,9 +55,17 @@ function relativeTime(iso: string | null): string {
   return `vor ${days} Tag${days > 1 ? "en" : ""}`;
 }
 
-function isOnline(lastSeen: string | null): boolean {
-  if (!lastSeen) return false;
-  return Date.now() - new Date(lastSeen).getTime() < 10 * 60 * 1000;
+function presenceLabel(p: Presence): string {
+  switch (p) {
+    case "live":
+      return "Live";
+    case "stale":
+      return "Stale";
+    case "offline":
+      return "Offline";
+    case "never":
+      return "Never";
+  }
 }
 
 export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, csrfToken, agentAvatars }) => {
@@ -62,7 +81,7 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
         </div>
         <div class="stat-box">
           <div class="stat-value" id="stat-online">{stats.onlineAgents}</div>
-          <div class="stat-label">Online (10 min)</div>
+          <div class="stat-label">Live</div>
         </div>
         <div class="stat-box">
           <div class="stat-value" id="stat-messages">{stats.recentMessages}</div>
@@ -76,22 +95,22 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
           <h2>Agents</h2>
           <div id="agents-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.77rem;">
             {agents.map((a) => {
-              const online = isOnline(a.last_seen_at);
+              const live = a.presence === "live";
               return (
-                <div style={online
+                <div style={live
                   ? "background: var(--color-surface); border: 2px solid #4a9a6a; border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start; box-shadow: 0 0 8px rgba(74,154,106,0.15);"
                   : "background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.46rem; padding: 0.77rem; display: flex; gap: 0.62rem; align-items: flex-start; opacity: 0.5;"
                 }>
                   <div style="flex-shrink: 0; position: relative;">
                     {a.avatar ? (
-                      <img src={avatarUrl(a.avatar)!} style={online
+                      <img src={avatarUrl(a.avatar)!} style={live
                         ? "width: 48px; height: 48px; border-radius: 50%; object-fit: cover;"
                         : "width: 48px; height: 48px; border-radius: 50%; object-fit: cover; filter: grayscale(0.7);"
                       } />
                     ) : (
                       <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--color-border);" />
                     )}
-                    {online && (
+                    {live && (
                       <div style="position: absolute; bottom: 1px; right: 1px; width: 12px; height: 12px; background: #4a9a6a; border-radius: 50%; border: 2px solid var(--color-surface);" />
                     )}
                   </div>
@@ -105,11 +124,17 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
                       </div>
                     )}
                     <div style="margin-top: 0.31rem;">
-                      {online ? (
-                        <span style="font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: #e8f0e8; color: #4a7a4a;">Online</span>
-                      ) : (
-                        <span style="font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: #ececec; color: #888;">Offline</span>
-                      )}
+                      <span
+                        data-presence={a.presence}
+                        style={live
+                          ? "font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: #e8f0e8; color: #4a7a4a;"
+                          : a.presence === "stale"
+                          ? "font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: #fff4d6; color: #8a6d1a;"
+                          : "font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 3px; background: #ececec; color: #888;"
+                        }
+                      >
+                        {presenceLabel(a.presence)}
+                      </span>
                     </div>
                     {a.working_on && (
                       <div style="font-size: 0.69rem; color: var(--color-muted); margin-top: 0.31rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -160,7 +185,6 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
       {raw(`<script>
 (function(){
   var POLL_MS = 15000;
-  var TEN_MIN = 10 * 60 * 1000;
 
   function relTime(iso) {
     if (!iso) return '\\u2014';
@@ -179,19 +203,33 @@ export const HomePage: FC<HomeProps> = ({ stats, activities, agents, userRole, c
 
   function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+  function presenceLabel(p) {
+    if (p === 'live') return 'Live';
+    if (p === 'stale') return 'Stale';
+    if (p === 'offline') return 'Offline';
+    return 'Never';
+  }
+
   function buildCard(a) {
-    var on = a.last_seen_at && (Date.now() - new Date(a.last_seen_at).getTime() < TEN_MIN);
+    // Server provides a 4-state presence field computed via
+    // PresenceService. No client-side liveness heuristic — the server
+    // knows NATS KV and we don't.
+    var p = a.presence || 'offline';
+    var live = p === 'live';
     var av = a.avatar ? '/avatars/' + a.avatar + '.png' : null;
-    var s = on
+    var s = live
       ? 'background:var(--color-surface);border:2px solid #4a9a6a;border-radius:0.46rem;padding:0.77rem;display:flex;gap:0.62rem;align-items:flex-start;box-shadow:0 0 8px rgba(74,154,106,0.15);'
       : 'background:var(--color-surface);border:1px solid var(--color-border);border-radius:0.46rem;padding:0.77rem;display:flex;gap:0.62rem;align-items:flex-start;opacity:0.5;';
-    var imgStyle = on
+    var imgStyle = live
       ? 'width:48px;height:48px;border-radius:50%;object-fit:cover;'
       : 'width:48px;height:48px;border-radius:50%;object-fit:cover;filter:grayscale(0.7);';
-    var dot = on ? '<div style="position:absolute;bottom:1px;right:1px;width:12px;height:12px;background:#4a9a6a;border-radius:50%;border:2px solid var(--color-surface);"></div>' : '';
-    var badge = on
-      ? '<span style="font-family:var(--font-mono);font-size:0.62rem;font-weight:600;padding:1px 6px;border-radius:3px;background:#e8f0e8;color:#4a7a4a;">Online</span>'
-      : '<span style="font-family:var(--font-mono);font-size:0.62rem;font-weight:600;padding:1px 6px;border-radius:3px;background:#ececec;color:#888;">Offline</span>';
+    var dot = live ? '<div style="position:absolute;bottom:1px;right:1px;width:12px;height:12px;background:#4a9a6a;border-radius:50%;border:2px solid var(--color-surface);"></div>' : '';
+    var badgeBg = live
+      ? 'background:#e8f0e8;color:#4a7a4a;'
+      : p === 'stale'
+        ? 'background:#fff4d6;color:#8a6d1a;'
+        : 'background:#ececec;color:#888;';
+    var badge = '<span data-presence="' + p + '" style="font-family:var(--font-mono);font-size:0.62rem;font-weight:600;padding:1px 6px;border-radius:3px;' + badgeBg + '">' + presenceLabel(p) + '</span>';
     var avHtml = av
       ? '<img src="' + av + '" style="' + imgStyle + '" />'
       : '<div style="width:48px;height:48px;border-radius:50%;background:var(--color-border);"></div>';

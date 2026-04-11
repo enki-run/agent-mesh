@@ -96,16 +96,8 @@ export function registerMessagingTools(
         );
       }
 
-      // Update presence — fire-and-forget; presence-update failures never
-      // fail the send.
-      try {
-        await nats.updatePresence(agentName, {});
-      } catch (err) {
-        log("warn", "nats presence update failed", {
-          agent: agentName,
-          err: String(err),
-        });
-      }
+      // Presence is already refreshed by authMiddleware on this request
+      // via PresenceService.touch — no need to touch NATS KV again here.
 
       // Log activity
       activity.logAsync({
@@ -177,15 +169,7 @@ export function registerMessagingTools(
         messages.push(msg);
       }
 
-      // Update presence — best-effort
-      try {
-        await nats.updatePresence(agentName, {});
-      } catch (err) {
-        log("warn", "nats presence update failed", {
-          agent: agentName,
-          err: String(err),
-        });
-      }
+      // Presence is already refreshed by authMiddleware for this request.
 
       if (messages.length === 0) {
         return ok({ messages: [], hint: "No new messages." });
@@ -254,15 +238,7 @@ export function registerMessagingTools(
         );
       }
 
-      // Update presence — best-effort
-      try {
-        await nats.updatePresence(agentName, {});
-      } catch (err) {
-        log("warn", "nats presence update failed", {
-          agent: agentName,
-          err: String(err),
-        });
-      }
+      // Presence is already refreshed by authMiddleware for this request.
 
       // Log activity
       activity.logAsync({

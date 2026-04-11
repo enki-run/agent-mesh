@@ -4,15 +4,7 @@ import { getCookie } from "hono/cookie";
 import type { Env, RequestAgent, AppVariables } from "./types";
 import type { AgentService } from "./services/agent";
 import type { ActivityService } from "./services/activity";
-
-// Minimal interface for NatsService — only what auth needs.
-// The full implementation lives in services/nats.ts (Task 5).
-export interface NatsPresence {
-  updatePresence(
-    name: string,
-    fields: Record<string, unknown>,
-  ): Promise<void> | void;
-}
+import type { PresenceService } from "./services/presence";
 
 // --- Public paths (no auth required) ---
 const PUBLIC_EXACT = new Set(["/health", "/login"]);
@@ -130,7 +122,11 @@ type HonoEnv = { Bindings: Env; Variables: AppVariables };
 const recentLogins = new Map<string, number>();
 const LOGIN_LOG_INTERVAL_MS = 30 * 60 * 1000; // Log at most once per 30 minutes per agent
 
-export function authMiddleware(agents: AgentService, nats: NatsPresence, activity?: ActivityService) {
+export function authMiddleware(
+  agents: AgentService,
+  presence: PresenceService,
+  activity?: ActivityService,
+) {
   return createMiddleware<HonoEnv>(async (c, next) => {
     const path = c.req.path;
 
@@ -214,17 +210,15 @@ export function authMiddleware(agents: AgentService, nats: NatsPresence, activit
         }
       }
 
-      // Update presence (best-effort — NATS may not be connected during startup)
+      // Single presence write-path: PresenceService.touch updates both
+      // SQLite last_seen_at and NATS KV in one call. NATS failures are
+      // swallowed inside the service so we never throw here.
       if (resolvedRole === "agent") {
         try {
-          agents.updatePresence(resolvedName, {});
+          await presence.touch(resolvedName);
         } catch {
-          // ignore — presence update is non-critical
-        }
-        try {
-          await nats.updatePresence(resolvedName, {});
-        } catch {
-          // ignore — NATS might not be connected yet
+          // Extremely defensive — presence.touch should never throw, but
+          // auth must not fail on a presence bookkeeping glitch.
         }
       }
 
