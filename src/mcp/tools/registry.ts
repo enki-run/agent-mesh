@@ -3,6 +3,11 @@ import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
 import { log } from "../../services/logger.ts";
+import {
+  computePresenceState,
+  PRESENCE_THRESHOLDS,
+  type Presence,
+} from "../../services/presence.ts";
 
 function ok(data: unknown) {
   return {
@@ -17,32 +22,27 @@ interface PresenceEntry {
   timestamp?: string;
 }
 
-/**
- * Presence state of an agent, derived from NATS KV presence + SQLite last_seen_at.
- *
- * - `live`    — in NATS KV presence bucket (active within last 600s)
- * - `stale`   — not in KV, but last_seen_at within the stale threshold (default 24h)
- * - `offline` — last_seen_at older than stale threshold
- * - `never`   — last_seen_at is null (agent created but never authenticated)
- *
- * Exported as a pure function so it can be unit-tested without a live NATS/DB.
- */
-export type Presence = "live" | "stale" | "offline" | "never";
+// ─── Backward-compat re-exports ──────────────────────────────────────
+// These shims keep existing imports working while call sites migrate to
+// `src/services/presence.ts`. Removed in the final cleanup commit of
+// the presence-service refactor.
 
-export const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24h
+/** @deprecated Import from `src/services/presence.ts` instead. */
+export type { Presence };
 
+/** @deprecated Import `PRESENCE_THRESHOLDS.staleMs` from `src/services/presence.ts`. */
+export const STALE_THRESHOLD_MS = PRESENCE_THRESHOLDS.staleMs;
+
+/** @deprecated Use `computePresenceState` from `src/services/presence.ts`. */
 export function computePresence(
   inPresenceKV: boolean,
   lastSeenAt: string | null,
   now: number = Date.now(),
-  staleThresholdMs: number = STALE_THRESHOLD_MS,
+  staleThresholdMs: number = PRESENCE_THRESHOLDS.staleMs,
 ): Presence {
-  if (inPresenceKV) return "live";
-  if (!lastSeenAt) return "never";
-  const lastSeenMs = Date.parse(lastSeenAt);
-  if (Number.isNaN(lastSeenMs)) return "never";
-  if (now - lastSeenMs < staleThresholdMs) return "stale";
-  return "offline";
+  return computePresenceState(inPresenceKV, lastSeenAt, now, {
+    staleMs: staleThresholdMs,
+  });
 }
 
 export function registerRegistryTools(
