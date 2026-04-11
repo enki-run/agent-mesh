@@ -51,7 +51,10 @@ const config = configResult;
 const db = initDatabase(config.databasePath);
 const nats = new NatsService(config.natsUrl);
 const activity = new ActivityService(db);
-const agents = new AgentService(db, activity);
+// C8: AgentService gets a NatsCleanup handle (interface-shimmed — the
+// NatsService class happens to implement deleteConsumer) so it can
+// garbage-collect JetStream consumers when agents are revoked/deleted/renamed.
+const agents = new AgentService(db, activity, nats);
 const rateLimiter = new RateLimiter(RATE_LIMIT_PER_MINUTE);
 
 // --- In-memory flash store (UUID -> { data, expiresAt }) ---

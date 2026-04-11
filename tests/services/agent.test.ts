@@ -107,3 +107,99 @@ describe("AgentService", () => {
     expect((list[0] as any).token_hash).toBeUndefined();
   });
 });
+
+// C8: NATS consumer cleanup hooks fire on revoke/delete/rename.
+// Uses a fake NatsCleanup implementation that records invocations.
+describe("AgentService NATS consumer cleanup (C8)", () => {
+  interface Call {
+    agent: string;
+  }
+
+  function setup() {
+    const calls: Call[] = [];
+    const fakeNats = {
+      deleteConsumer: async (agent: string) => {
+        calls.push({ agent });
+      },
+    };
+    const db = createTestDb();
+    const activity = new ActivityService(db);
+    const agents = new AgentService(db, activity, fakeNats);
+    return { agents, calls };
+  }
+
+  it("calls deleteConsumer on revoke", async () => {
+    const { agents, calls } = setup();
+    const { agent } = agents.create("cleanup-a");
+    agents.revokeById(agent.id);
+    // fire-and-forget — wait for the microtask to resolve
+    await new Promise((r) => setImmediate(r));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe("cleanup-a");
+  });
+
+  it("calls deleteConsumer on deleteById", async () => {
+    const { agents, calls } = setup();
+    const { agent } = agents.create("cleanup-b");
+    agents.deleteById(agent.id);
+    await new Promise((r) => setImmediate(r));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe("cleanup-b");
+  });
+
+  it("calls deleteConsumer with OLD name on rename", async () => {
+    const { agents, calls } = setup();
+    const { agent } = agents.create("cleanup-old");
+    agents.rename(agent.id, "cleanup-new");
+    await new Promise((r) => setImmediate(r));
+    // Old consumer is deleted; a new one will be lazily created on the
+    // next MCP call under the new name via ensureConsumer.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe("cleanup-old");
+  });
+
+  it("does not call deleteConsumer on reactivate", async () => {
+    const { agents, calls } = setup();
+    const { agent } = agents.create("cleanup-c");
+    agents.revokeById(agent.id);
+    agents.reactivate(agent.id);
+    await new Promise((r) => setImmediate(r));
+    // Only the revoke triggers cleanup; reactivate keeps the same name
+    // and ensureConsumer will recreate the consumer on the next MCP call.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe("cleanup-c");
+  });
+
+  it("swallows deleteConsumer errors without breaking the lifecycle op", async () => {
+    const calls: Call[] = [];
+    const flakyNats = {
+      deleteConsumer: async (agent: string) => {
+        calls.push({ agent });
+        throw new Error("nats down");
+      },
+    };
+    const db = createTestDb();
+    const activity = new ActivityService(db);
+    const agents = new AgentService(db, activity, flakyNats);
+
+    const { agent } = agents.create("cleanup-d");
+    // The revoke itself must still succeed even though cleanup throws.
+    const result = agents.revokeById(agent.id);
+    await new Promise((r) => setImmediate(r));
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("works without nats dependency (backwards compat)", async () => {
+    // AgentService must still function when no NatsCleanup is provided.
+    // Both revoke (sets is_active=0) and delete (hard-removes) should
+    // complete without errors, and renamed/reactivated should too.
+    const db = createTestDb();
+    const activity = new ActivityService(db);
+    const agents = new AgentService(db, activity);
+    const { agent } = agents.create("no-nats");
+    expect(agents.revokeById(agent.id)).toBe(true);
+    // revoke does not delete — the row is still there with is_active=0
+    expect(agents.deleteById(agent.id)).toBe(true);
+  });
+});

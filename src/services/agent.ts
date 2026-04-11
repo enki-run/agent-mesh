@@ -4,6 +4,17 @@ import type Database from "better-sqlite3";
 import type { Agent } from "../types";
 import { MAX_AGENTS } from "../types";
 import type { ActivityService } from "./activity";
+import { log } from "./logger";
+
+// Minimal interface for NATS cleanup — only what AgentService needs.
+// Analog to NatsPresence in auth.ts, this keeps the coupling narrow
+// and the service unit-testable without a live NATS connection.
+// C8: Consumer cleanup on agent lifecycle events (revoke/delete/rename)
+// prevents orphaned JetStream consumers from accumulating and eventually
+// hitting the per-stream quota.
+export interface NatsCleanup {
+  deleteConsumer(agentName: string): Promise<void>;
+}
 
 export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -31,7 +42,24 @@ export class AgentService {
   constructor(
     private db: Database.Database,
     private activity: ActivityService,
+    private nats?: NatsCleanup,
   ) {}
+
+  /**
+   * Best-effort cleanup of NATS durable consumers for an agent.
+   * Called from revoke/delete/rename. Never throws — failures are
+   * logged as warnings so the lifecycle operation itself still succeeds.
+   */
+  private cleanupNatsConsumers(agentName: string, context: string): void {
+    if (!this.nats) return;
+    this.nats.deleteConsumer(agentName).catch((err) => {
+      log("warn", "nats consumer cleanup failed", {
+        agent: agentName,
+        context,
+        err: String(err),
+      });
+    });
+  }
 
   create(
     name: string,
@@ -138,6 +166,9 @@ export class AgentService {
         summary: `Agent "${agent.name}" revoked`,
         agent_name: adminName,
       });
+      // C8: Clean up NATS consumers so revoked agents don't leak
+      // durable subscriptions. Fire-and-forget, non-blocking.
+      this.cleanupNatsConsumers(agent.name, "revoke");
       return true;
     }
 
@@ -184,6 +215,7 @@ export class AgentService {
 
     if (!agent) return false;
 
+    const oldName = agent.name;
     const now = new Date().toISOString();
     const result = this.db
       .prepare("UPDATE agents SET name = ?, updated_at = ? WHERE id = ?")
@@ -196,9 +228,12 @@ export class AgentService {
         action: "agent_renamed",
         entity_type: "agent",
         entity_id: id,
-        summary: `Agent "${agent.name}" renamed to "${newName}"`,
+        summary: `Agent "${oldName}" renamed to "${newName}"`,
         agent_name: adminName,
       });
+      // C8: Delete the old-name consumer; a new one will be created
+      // on the next MCP call under the new name via ensureConsumer.
+      this.cleanupNatsConsumers(oldName, "rename");
       return true;
     }
 
@@ -219,6 +254,8 @@ export class AgentService {
     clearTokenCache();
 
     if (result.changes > 0) {
+      // C8: Clean up NATS consumers for the deleted agent.
+      this.cleanupNatsConsumers(agent.name, "delete");
       this.activity.log({
         action: "agent_deleted",
         entity_type: "agent",
