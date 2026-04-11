@@ -306,41 +306,56 @@ function cookieSecretFor(env: Env): string {
 }
 
 // --- Dashboard: Home ---
-app.get("/", (c) => {
+app.get("/", async (c) => {
   const agent = c.get("agent");
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
 
-  const stats = getHomeStats(db);
+  const [stats, presenceEntries] = await Promise.all([
+    getHomeStats(db, presence),
+    presence.list(),
+  ]);
   const activityResult = activity.list({ limit: 5, offset: 0 });
-  const allAgents = agents.list();
+
+  // Decorate each agent with its computed presence state so the view
+  // renders "live" vs "stale/offline/never" consistently with mesh_status.
+  const agentsForView = presenceEntries.map((e) => ({
+    ...e.agent,
+    presence: e.presence,
+    role: e.liveMeta?.role ?? e.agent.role,
+    working_on: e.liveMeta?.working_on ?? e.agent.working_on,
+    last_seen_at: e.effectiveLastSeen,
+  }));
 
   return c.html(
     <HomePage
       stats={stats}
       activities={activityResult.data}
-      agents={allAgents}
+      agents={agentsForView}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(allAgents.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
+      agentAvatars={Object.fromEntries(agentsForView.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
 
 // --- Dashboard: Home JSON (for polling) ---
-app.get("/api/home", (c) => {
-  const stats = getHomeStats(db);
-  const allAgents = agents.list();
+app.get("/api/home", async (c) => {
+  const [stats, presenceEntries] = await Promise.all([
+    getHomeStats(db, presence),
+    presence.list(),
+  ]);
   const activityResult = activity.list({ limit: 5, offset: 0 });
 
   return c.json({
     stats,
-    agents: allAgents.map((a) => ({
-      name: a.name,
-      role: a.role,
-      avatar: a.avatar,
-      working_on: a.working_on,
-      last_seen_at: a.last_seen_at,
-      is_active: a.is_active,
+    agents: presenceEntries.map((e) => ({
+      name: e.agent.name,
+      role: e.liveMeta?.role ?? e.agent.role,
+      avatar: e.agent.avatar,
+      working_on: e.liveMeta?.working_on ?? e.agent.working_on,
+      last_seen_at: e.effectiveLastSeen,
+      is_active: e.agent.is_active,
+      presence: e.presence,
     })),
     activities: activityResult.data,
   });

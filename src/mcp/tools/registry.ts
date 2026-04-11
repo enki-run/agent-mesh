@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
 import type { PresenceService } from "../../services/presence.ts";
-import { log } from "../../services/logger.ts";
 import {
   computePresenceState,
   PRESENCE_THRESHOLDS,
@@ -14,13 +13,6 @@ function ok(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
   };
-}
-
-interface PresenceEntry {
-  role?: string;
-  capabilities?: string[];
-  working_on?: string;
-  timestamp?: string;
 }
 
 // ─── Backward-compat re-exports ──────────────────────────────────────
@@ -60,40 +52,24 @@ export function registerRegistryTools(
     {},
     { readOnlyHint: true },
     async () => {
-      const allAgents = agents.list();
-      // C4: If NATS is unavailable, degrade gracefully to DB-only presence.
-      // Agents still show up with their last_seen_at, just without the
-      // "live" KV signal — computePresence handles the empty Map correctly.
-      let presence: Map<string, unknown>;
-      try {
-        presence = await nats.getPresence();
-      } catch (err) {
-        log("warn", "nats presence read failed in mesh_status", {
-          err: String(err),
-        });
-        presence = new Map();
-      }
-
-      const agentList = allAgents.map((agent) => {
-        const p = presence.get(agent.name) as PresenceEntry | undefined;
-        const inPresenceKV = presence.has(agent.name);
-        // Prefer the NATS KV timestamp when the agent is live; otherwise
-        // fall back to the SQLite last_seen_at (which is touched by authMiddleware).
-        const effectiveLastSeen = p?.timestamp ?? agent.last_seen_at ?? null;
-        const presenceState = computePresence(inPresenceKV, effectiveLastSeen);
-        return {
-          name: agent.name,
-          avatar: agent.avatar ?? null,
-          role: p?.role ?? agent.role ?? null,
-          capabilities: p?.capabilities ?? (agent.capabilities ? JSON.parse(agent.capabilities) : null),
-          is_active: agent.is_active === 1,
-          // `online` kept for backward compatibility — equivalent to presence === "live"
-          online: inPresenceKV,
-          presence: presenceState,
-          working_on: p?.working_on ?? agent.working_on ?? null,
-          last_seen_at: effectiveLastSeen,
-        };
-      });
+      // Single read-path: PresenceService.list() joins SQLite + NATS KV
+      // and runs the 4-state calculation. C4 graceful degradation on
+      // NATS failure is handled inside the service.
+      const entries = await presence.list();
+      const agentList = entries.map((e) => ({
+        name: e.agent.name,
+        avatar: e.agent.avatar ?? null,
+        role: e.liveMeta?.role ?? e.agent.role ?? null,
+        capabilities:
+          e.liveMeta?.capabilities ??
+          (e.agent.capabilities ? JSON.parse(e.agent.capabilities) : null),
+        is_active: e.agent.is_active === 1,
+        // `online` kept for backward compatibility — equivalent to presence === "live"
+        online: e.presence === "live",
+        presence: e.presence,
+        working_on: e.liveMeta?.working_on ?? e.agent.working_on ?? null,
+        last_seen_at: e.effectiveLastSeen,
+      }));
 
       return ok({ agents: agentList, count: agentList.length });
     },
