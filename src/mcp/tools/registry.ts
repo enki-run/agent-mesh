@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
+import type { PresenceService } from "../../services/presence.ts";
 import { log } from "../../services/logger.ts";
 import {
   computePresenceState,
@@ -49,6 +50,7 @@ export function registerRegistryTools(
   server: McpServer,
   nats: NatsService,
   agents: AgentService,
+  presence: PresenceService,
   agentName: string,
 ): void {
   // ── mesh_status ───────────────────────────────────────────────
@@ -107,27 +109,14 @@ export function registerRegistryTools(
       working_on: z.string().optional().describe("What you are currently working on"),
     },
     async (params) => {
-      // Update agent presence in DB
-      agents.updatePresence(agentName, {
+      // Single presence write-path: SQLite + NATS KV updated atomically
+      // (from the caller's perspective). NATS KV failures are logged
+      // internally by the service and never surface here.
+      await presence.touch(agentName, {
         role: params.role,
-        capabilities: params.capabilities ? JSON.stringify(params.capabilities) : undefined,
+        capabilities: params.capabilities,
         working_on: params.working_on,
       });
-
-      // Update NATS presence — best-effort. DB presence is already persisted
-      // above, so a NATS failure only loses the 10-minute "live" signal.
-      try {
-        await nats.updatePresence(agentName, {
-          role: params.role,
-          capabilities: params.capabilities,
-          working_on: params.working_on,
-        });
-      } catch (err) {
-        log("warn", "nats presence update failed in mesh_register", {
-          agent: agentName,
-          err: String(err),
-        });
-      }
 
       return ok({
         agent: agentName,

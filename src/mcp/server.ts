@@ -5,6 +5,7 @@ import type { NatsService } from "../services/nats.ts";
 import type { AgentService } from "../services/agent.ts";
 import type { ActivityService } from "../services/activity.ts";
 import type { RateLimiter } from "../services/ratelimit.ts";
+import type { PresenceService } from "../services/presence.ts";
 import { registerMessagingTools } from "./tools/messaging.ts";
 import { registerRegistryTools } from "./tools/registry.ts";
 import { registerHistoryTools } from "./tools/history.ts";
@@ -14,6 +15,7 @@ export function createMcpServer(
   agents: AgentService,
   activity: ActivityService,
   rateLimiter: RateLimiter,
+  presence: PresenceService,
   agentName: string,
   db: Database.Database,
 ): McpServer {
@@ -36,7 +38,7 @@ export function createMcpServer(
   );
 
   registerMessagingTools(server, nats, agents, activity, rateLimiter, agentName, db);
-  registerRegistryTools(server, nats, agents, agentName);
+  registerRegistryTools(server, nats, agents, presence, agentName);
   registerHistoryTools(server, db);
 
   return server;

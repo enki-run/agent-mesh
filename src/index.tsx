@@ -27,6 +27,7 @@ import { listMessages, listConversations } from "./services/message-queries.js";
 import { setFlash, getFlash } from "./services/flash.js";
 import { getHomeStats } from "./services/home-stats.js";
 import { checkHealth } from "./services/health.js";
+import { PresenceService } from "./services/presence.js";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
@@ -60,6 +61,9 @@ const activity = new ActivityService(db);
 // garbage-collect JetStream consumers when agents are revoked/deleted/renamed.
 const agents = new AgentService(db, activity, nats);
 const rateLimiter = new RateLimiter(RATE_LIMIT_PER_MINUTE);
+// Presence: single write-path (touch) + single read-path (list/countByState).
+// Wired into authMiddleware and every MCP tool that needs agent presence.
+const presence = new PresenceService(db, nats);
 
 // --- Hono app ---
 type HonoEnv = { Bindings: Env; Variables: AppVariables };
@@ -216,7 +220,7 @@ app.post("/login", async (c) => {
 });
 
 // --- Auth middleware on all other routes ---
-app.use("*", authMiddleware(agents, nats, activity));
+app.use("*", authMiddleware(agents, presence, activity));
 
 // --- Logout ---
 app.post("/logout", (c) => {
@@ -261,6 +265,7 @@ app.all("/mcp", async (c) => {
     agents,
     activity,
     rateLimiter,
+    presence,
     agentName,
     db,
   );
