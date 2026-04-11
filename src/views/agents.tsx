@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { Layout } from "./layout.js";
 import type { Agent } from "../types.js";
+import type { Presence } from "../services/presence.js";
 
 const AVATAR_IDS = Array.from({ length: 24 }, (_, i) => `avatar-${String(i + 1).padStart(2, "0")}`);
 
@@ -9,12 +10,49 @@ function avatarUrl(avatarId: string | null): string | null {
   return `/avatars/${avatarId}.png`;
 }
 
+/** Agent row shape for the /agents admin table — plain agent data plus
+ *  the computed 4-state presence from PresenceService. `presence` is
+ *  distinct from `is_active`: the former is liveness, the latter is
+ *  "token still valid". A revoked agent can still be live until it
+ *  falls out of the NATS KV bucket. */
+export type AgentForAdmin = Omit<Agent, "token_hash"> & {
+  presence: Presence;
+};
+
 interface AgentsPageProps {
-  agents: Omit<Agent, "token_hash">[];
+  agents: AgentForAdmin[];
   csrfToken: string;
   newToken?: string;
   error?: string;
   userRole?: string;
+}
+
+function presenceBadgeStyle(p: Presence): string {
+  const base =
+    "font-family: var(--font-mono); font-size: 0.69rem; font-weight: 600; padding: 2px 8px; border-radius: 3px;";
+  switch (p) {
+    case "live":
+      return `${base} background: #e8f0e8; color: #4a7a4a;`;
+    case "stale":
+      return `${base} background: #fff4d6; color: #8a6d1a;`;
+    case "offline":
+      return `${base} background: #ececec; color: #888;`;
+    case "never":
+      return `${base} background: #f5f5f5; color: #aaa;`;
+  }
+}
+
+function presenceLabel(p: Presence): string {
+  switch (p) {
+    case "live":
+      return "Live";
+    case "stale":
+      return "Stale";
+    case "offline":
+      return "Offline";
+    case "never":
+      return "Never";
+  }
 }
 
 function fmtDate(iso: string): string {
@@ -128,7 +166,8 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
           <thead>
             <tr style="border-bottom: 2px solid var(--color-divider); text-align: left;">
               <th style="padding: 0.46rem 0.62rem;">Name</th>
-              <th style="padding: 0.46rem 0.62rem;">Status</th>
+              <th style="padding: 0.46rem 0.62rem;">Token</th>
+              <th style="padding: 0.46rem 0.62rem;">Presence</th>
               <th style="padding: 0.46rem 0.62rem;">Zuletzt gesehen</th>
               <th style="padding: 0.46rem 0.62rem;">Erstellt am</th>
               <th style="padding: 0.46rem 0.62rem; text-align: right;">Aktionen</th>
@@ -204,10 +243,15 @@ export const AgentsPage: FC<AgentsPageProps> = ({ agents, csrfToken, newToken, e
                 </td>
                 <td style="padding: 0.46rem 0.62rem;">
                   {a.is_active ? (
-                    <span style="font-family: var(--font-mono); font-size: 0.69rem; font-weight: 600; padding: 2px 8px; border-radius: 3px; background: #e8f0e8; color: #4a7a4a;">Aktiv</span>
+                    <span title="Token ist gueltig" style="font-family: var(--font-mono); font-size: 0.69rem; font-weight: 600; padding: 2px 8px; border-radius: 3px; background: #e8f0e8; color: #4a7a4a;">Aktiv</span>
                   ) : (
-                    <span style="font-family: var(--font-mono); font-size: 0.69rem; font-weight: 600; padding: 2px 8px; border-radius: 3px; background: #f5e4e4; color: #904040;">Deaktiviert</span>
+                    <span title="Token wurde widerrufen" style="font-family: var(--font-mono); font-size: 0.69rem; font-weight: 600; padding: 2px 8px; border-radius: 3px; background: #f5e4e4; color: #904040;">Deaktiviert</span>
                   )}
+                </td>
+                <td style="padding: 0.46rem 0.62rem;">
+                  <span data-presence={a.presence} style={presenceBadgeStyle(a.presence)}>
+                    {presenceLabel(a.presence)}
+                  </span>
                 </td>
                 <td style="padding: 0.46rem 0.62rem; font-family: var(--font-mono); font-size: 0.77rem; color: var(--color-light);">
                   {a.last_seen_at ? fmtDate(a.last_seen_at) : "\u2014"}

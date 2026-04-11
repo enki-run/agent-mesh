@@ -362,7 +362,7 @@ app.get("/api/home", async (c) => {
 });
 
 // --- Dashboard: Agents (admin only) ---
-app.get("/agents", (c) => {
+app.get("/agents", async (c) => {
   const agent = c.get("agent");
   if (agent?.role !== "admin") {
     return c.redirect("/");
@@ -372,9 +372,18 @@ app.get("/agents", (c) => {
   const flashKey = c.req.query("flash");
   const flash = getFlash(flashKey);
 
+  // Same read-path as / and mesh_status: one presence.list() call per
+  // request so the admin table agrees with the rest of the dashboard.
+  const entries = await presence.list();
+  const agentsForView = entries.map((e) => ({
+    ...e.agent,
+    presence: e.presence,
+    last_seen_at: e.effectiveLastSeen,
+  }));
+
   return c.html(
     <AgentsPage
-      agents={agents.list()}
+      agents={agentsForView}
       csrfToken={csrfToken}
       newToken={flash?.newToken}
       error={flash?.error}
