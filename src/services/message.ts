@@ -1,6 +1,8 @@
 import { ulid } from "ulidx";
+import type Database from "better-sqlite3";
 import type { Message, MessagePriority } from "../types";
 import { MAX_PAYLOAD_BYTES, MAX_CONTEXT_LENGTH, DEFAULT_TTL_SECONDS } from "../types";
+import { log } from "./logger.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -74,4 +76,105 @@ export function serializeMessage(msg: Message): Uint8Array {
 
 export function deserializeMessage(data: Uint8Array): Message {
   return JSON.parse(decoder.decode(data)) as Message;
+}
+
+/**
+ * Inserts a message row into the `messages` table. Throws on duplicate id
+ * or any other SQLite error — the caller decides how to handle it.
+ *
+ * Kept separate from `sendAndPersistMessage` so the caller in tooling code
+ * can reuse just the DB layer (e.g. tests, backfill scripts).
+ */
+export function persistMessage(db: Database.Database, msg: Message): void {
+  db.prepare(
+    `INSERT INTO messages (id, from_agent, to_agent, type, payload, context, correlation_id, reply_to, priority, ttl_seconds, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    msg.id,
+    msg.from,
+    msg.to,
+    msg.type,
+    msg.payload,
+    msg.context,
+    msg.correlation_id,
+    msg.reply_to,
+    msg.priority,
+    msg.ttl_seconds,
+    msg.created_at,
+  );
+}
+
+/**
+ * Minimal NATS surface needed by `sendAndPersistMessage`. Matches the
+ * real `NatsService.publish` signature so a live service can be passed
+ * directly, while tests can use a plain object with a `publish` spy.
+ */
+export interface NatsPublisher {
+  publish(subject: string, data: Uint8Array, msgId: string): Promise<void>;
+}
+
+export interface SendResult {
+  /**
+   * True if the message was successfully handed to NATS. This is the
+   * authoritative "did delivery happen" bit — callers should return
+   * success to their clients when this is true, regardless of `persisted`.
+   */
+  delivered: boolean;
+  /**
+   * True if the message was successfully inserted into the SQLite history
+   * table. `delivered=true && persisted=false` is a rare history-gap
+   * scenario and is logged loudly (level=error, "CRITICAL" prefix).
+   */
+  persisted: boolean;
+  /** Error code when `delivered=false`. Currently only `"nats_unavailable"`. */
+  error?: "nats_unavailable";
+}
+
+/**
+ * Dual-write order for mesh messages: NATS first, DB second.
+ *
+ * Rationale (see Mesh-ADR-006 in Plexus): NATS is the source-of-truth
+ * for delivery, SQLite is a read-replica for history/audit. Publishing
+ * NATS first means a failed publish leaves no row in the DB — no
+ * "phantom-send" in `mesh_history`. If NATS succeeds but the DB insert
+ * fails afterwards, the message IS delivered (that's what mattered) and
+ * we log a CRITICAL event so the gap is observable.
+ */
+export async function sendAndPersistMessage(
+  nats: NatsPublisher,
+  db: Database.Database,
+  msg: Message,
+  subject: string,
+): Promise<SendResult> {
+  // 1. NATS publish FIRST — this IS the delivery act.
+  try {
+    await nats.publish(subject, serializeMessage(msg), msg.id);
+  } catch (err) {
+    log("error", "nats publish failed in sendAndPersistMessage", {
+      msg_id: msg.id,
+      from: msg.from,
+      to: msg.to,
+      subject,
+      err: String(err),
+    });
+    return { delivered: false, persisted: false, error: "nats_unavailable" };
+  }
+
+  // 2. DB insert SECOND — read-replica for history. A failure here means
+  // the message was delivered but is missing from history. Log loudly
+  // ("CRITICAL" prefix) so the gap is visible, but return delivered=true
+  // because the caller should see a successful send.
+  try {
+    persistMessage(db, msg);
+  } catch (err) {
+    log("error", "CRITICAL: message delivered but history insert failed", {
+      msg_id: msg.id,
+      from: msg.from,
+      to: msg.to,
+      err: String(err),
+    });
+    return { delivered: true, persisted: false };
+  }
+
+  return { delivered: true, persisted: true };
 }
