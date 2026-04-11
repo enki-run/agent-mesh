@@ -10,6 +10,7 @@ import type {
   JetStreamManager,
   KV,
 } from "nats";
+import { log } from "./logger.js";
 
 const STREAM_NAME = "MESH_MESSAGES";
 const KV_BUCKET = "mesh-presence";
@@ -39,9 +40,37 @@ export class NatsService {
   constructor(private url: string) {}
 
   async connect(): Promise<void> {
-    this.nc = await connect({ servers: this.url });
+    // C4: Resilient reconnect config. `reconnect: true` + infinite
+    // attempts with 2s backoff means a transient NATS outage (restart,
+    // network glitch) heals itself without any mesh-side intervention.
+    // We intentionally do NOT set `waitOnFirstConnect: true` here —
+    // first-connect retries are handled by the explicit loop in start(),
+    // which gives us clearer startup logs and a bounded retry count.
+    this.nc = await connect({
+      servers: this.url,
+      reconnect: true,
+      maxReconnectAttempts: -1,
+      reconnectTimeWait: 2000,
+      pingInterval: 20_000,
+      maxPingOut: 3,
+      name: "agent-mesh",
+    });
     this.jsm = await this.nc.jetstreamManager();
     this.js = this.nc.jetstream();
+
+    // Log NATS connection status events as structured JSON so we can see
+    // reconnects, disconnects, and stale-connection warnings in the log
+    // viewer. Runs as a detached async iterator; errors are suppressed to
+    // prevent crashes if the iterator closes during shutdown.
+    (async () => {
+      try {
+        for await (const s of this.nc.status()) {
+          log("info", "nats status event", { event: s.type, data: String(s.data ?? "") });
+        }
+      } catch {
+        // Iterator closed — expected on graceful shutdown.
+      }
+    })();
 
     // Ensure stream exists
     try {

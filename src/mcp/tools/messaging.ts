@@ -13,6 +13,7 @@ import {
   serializeMessage,
   deserializeMessage,
 } from "../../services/message.ts";
+import { log } from "../../services/logger.ts";
 
 function ok(data: unknown) {
   return {
@@ -99,14 +100,37 @@ export function registerMessagingTools(
       );
 
       // Publish to NATS (lowercase subject for case-insensitive routing)
+      // C4: NATS may be transiently unavailable. If publish fails, the
+      // message is already persisted in SQLite — we log loudly and return
+      // an error so the caller knows delivery is not confirmed.
       const subject =
         params.to === "broadcast"
           ? "mesh.broadcast"
           : `mesh.agents.${params.to.toLowerCase()}.inbox`;
-      await nats.publish(subject, serializeMessage(msg), msg.id);
+      try {
+        await nats.publish(subject, serializeMessage(msg), msg.id);
+      } catch (err) {
+        log("error", "nats publish failed in mesh_send", {
+          msg_id: msg.id,
+          from: agentName,
+          to: params.to,
+          err: String(err),
+        });
+        return error(
+          `nats_unavailable: message stored in history but not delivered. Retry in a few seconds.`,
+        );
+      }
 
-      // Update presence
-      await nats.updatePresence(agentName, {});
+      // Update presence — fire-and-forget; presence-update failures never
+      // fail the send.
+      try {
+        await nats.updatePresence(agentName, {});
+      } catch (err) {
+        log("warn", "nats presence update failed", {
+          agent: agentName,
+          err: String(err),
+        });
+      }
 
       // Log activity
       activity.logAsync({
@@ -137,8 +161,18 @@ export function registerMessagingTools(
     async (params) => {
       const limit = params.limit ?? 10;
 
-      // Pull from NATS
-      const pulled = await nats.pullMessages(agentName, limit);
+      // Pull from NATS. C4: NATS unavailability degrades gracefully —
+      // return an empty inbox with a hint so the caller knows to retry.
+      let pulled: Awaited<ReturnType<typeof nats.pullMessages>>;
+      try {
+        pulled = await nats.pullMessages(agentName, limit);
+      } catch (err) {
+        log("warn", "nats pull failed in mesh_receive", {
+          agent: agentName,
+          err: String(err),
+        });
+        return ok({ messages: [], hint: "nats_unavailable, retry shortly" });
+      }
 
       const messages: Message[] = [];
 
@@ -168,8 +202,15 @@ export function registerMessagingTools(
         messages.push(msg);
       }
 
-      // Update presence
-      await nats.updatePresence(agentName, {});
+      // Update presence — best-effort
+      try {
+        await nats.updatePresence(agentName, {});
+      } catch (err) {
+        log("warn", "nats presence update failed", {
+          agent: agentName,
+          err: String(err),
+        });
+      }
 
       if (messages.length === 0) {
         return ok({ messages: [], hint: "No new messages." });
@@ -247,11 +288,32 @@ export function registerMessagingTools(
       );
 
       // Publish to NATS (lowercase for case-insensitive routing)
+      // C4: Same reliability semantics as mesh_send — the reply is already
+      // in SQLite, we log + return an error if NATS publish fails.
       const subject = `mesh.agents.${original.from_agent.toLowerCase()}.inbox`;
-      await nats.publish(subject, serializeMessage(msg), msg.id);
+      try {
+        await nats.publish(subject, serializeMessage(msg), msg.id);
+      } catch (err) {
+        log("error", "nats publish failed in mesh_reply", {
+          msg_id: msg.id,
+          reply_to: params.message_id,
+          to: original.from_agent,
+          err: String(err),
+        });
+        return error(
+          `nats_unavailable: reply stored in history but not delivered. Retry in a few seconds.`,
+        );
+      }
 
-      // Update presence
-      await nats.updatePresence(agentName, {});
+      // Update presence — best-effort
+      try {
+        await nats.updatePresence(agentName, {});
+      } catch (err) {
+        log("warn", "nats presence update failed", {
+          agent: agentName,
+          err: String(err),
+        });
+      }
 
       // Log activity
       activity.logAsync({

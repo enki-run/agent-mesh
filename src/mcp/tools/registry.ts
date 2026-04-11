@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { NatsService } from "../../services/nats.ts";
 import type { AgentService } from "../../services/agent.ts";
+import { log } from "../../services/logger.ts";
 
 function ok(data: unknown) {
   return {
@@ -58,7 +59,18 @@ export function registerRegistryTools(
     { readOnlyHint: true },
     async () => {
       const allAgents = agents.list();
-      const presence = await nats.getPresence();
+      // C4: If NATS is unavailable, degrade gracefully to DB-only presence.
+      // Agents still show up with their last_seen_at, just without the
+      // "live" KV signal — computePresence handles the empty Map correctly.
+      let presence: Map<string, unknown>;
+      try {
+        presence = await nats.getPresence();
+      } catch (err) {
+        log("warn", "nats presence read failed in mesh_status", {
+          err: String(err),
+        });
+        presence = new Map();
+      }
 
       const agentList = allAgents.map((agent) => {
         const p = presence.get(agent.name) as PresenceEntry | undefined;
@@ -102,12 +114,20 @@ export function registerRegistryTools(
         working_on: params.working_on,
       });
 
-      // Update NATS presence
-      await nats.updatePresence(agentName, {
-        role: params.role,
-        capabilities: params.capabilities,
-        working_on: params.working_on,
-      });
+      // Update NATS presence — best-effort. DB presence is already persisted
+      // above, so a NATS failure only loses the 10-minute "live" signal.
+      try {
+        await nats.updatePresence(agentName, {
+          role: params.role,
+          capabilities: params.capabilities,
+          working_on: params.working_on,
+        });
+      } catch (err) {
+        log("warn", "nats presence update failed in mesh_register", {
+          agent: agentName,
+          err: String(err),
+        });
+      }
 
       return ok({
         agent: agentName,

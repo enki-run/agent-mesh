@@ -867,7 +867,32 @@ async function start() {
     });
   }
 
-  await nats.connect();
+  // C4: Bounded retry loop for initial NATS connection. Once connected,
+  // the NatsService keeps itself alive via `reconnect: true`. This loop
+  // only matters for the first attempt — if NATS is still booting
+  // (compose startup race), we wait up to ~20s.
+  const MAX_CONNECT_ATTEMPTS = 10;
+  for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS; attempt++) {
+    try {
+      await nats.connect();
+      break;
+    } catch (err) {
+      if (attempt === MAX_CONNECT_ATTEMPTS) {
+        log("fatal", "nats connect failed after max attempts", {
+          attempts: attempt,
+          url: config.natsUrl,
+          err: String(err),
+        });
+        throw err;
+      }
+      log("warn", "nats connect attempt failed, retrying", {
+        attempt,
+        max: MAX_CONNECT_ATTEMPTS,
+        err: String(err),
+      });
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   log("info", "nats connected", { url: config.natsUrl });
 
   const server = serve({ fetch: app.fetch, port: config.port });
