@@ -10,7 +10,7 @@ import { V2_TOKENS } from "./tokens.js";
 export interface V2MessagesProps {
   result: PaginatedResult<MessageView>;
   filterAgent?: string;
-  filterType?: string;
+  filterRouting?: string; // "direct" | "broadcast" | "" (capability deferred)
   query?: string;
   agentRoles: Record<string, string | null>;
   agentIds: Record<string, string>;
@@ -18,14 +18,19 @@ export interface V2MessagesProps {
   csrfToken?: string;
 }
 
-const TYPE_FILTERS: ReadonlyArray<readonly [string, string, string]> = [
-  ["",                      "All",      ""],
-  ["answer",                "Answer",   V2_TOKENS.accent2],
-  ["question",              "Question", V2_TOKENS.info],
-  ["info",                  "Info",     V2_TOKENS.textDim],
-  ["alert",                 "Alert",    V2_TOKENS.danger],
-  ["incident_response",     "Incident", V2_TOKENS.warn],
+// Routing-mode filter chips. `capability` is shown but disabled — the
+// routing mode itself is spec'd as Option A (server-side fan-out, see
+// plexus design-spec entities:8r7p8odnnl1ys956xp5n) but not yet implemented
+// in the backend. We surface it so future arrivals know the slot exists.
+const ROUTING_FILTERS: ReadonlyArray<readonly [string, string, string, boolean]> = [
+  ["",          "Routing · all", "",                false],
+  ["direct",    "direct",        V2_TOKENS.text,    false],
+  ["broadcast", "broadcast",     V2_TOKENS.warn,    false],
+  ["capability","capability:*",  V2_TOKENS.info,    true ], // disabled
 ];
+
+const CAPABILITY_ROUTING_DOC =
+  "https://plexus.nxio.me/entities/entities:8r7p8odnnl1ys956xp5n";
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -59,23 +64,52 @@ function buildUrl(base: string, params: Record<string, string | undefined>): str
   return qs ? `${base}?${qs}` : base;
 }
 
-const TypeChip: FC<{ type: string; label: string; color: string; active: boolean; agentFilter?: string; query?: string }> = ({ type, label, color, active, agentFilter, query }) => {
-  const href = buildUrl("/messages", { type: type || undefined, agent: agentFilter, q: query });
+function routingOf(to: string): "direct" | "broadcast" | "capability" {
+  if (to === "broadcast") return "broadcast";
+  if (to.startsWith("capability:")) return "capability";
+  return "direct";
+}
+
+function routingColor(r: "direct" | "broadcast" | "capability"): string {
+  return r === "broadcast" ? V2_TOKENS.warn : r === "capability" ? V2_TOKENS.info : V2_TOKENS.textDim;
+}
+
+// Routing chip — clickable except when disabled (then it links to the
+// plexus design spec for the not-yet-implemented routing mode).
+const RoutingChip: FC<{ value: string; label: string; color: string; disabled: boolean; active: boolean; agentFilter?: string; query?: string }> = ({ value, label, color, disabled, active, agentFilter, query }) => {
+  const baseStyle = `padding:6px 12px;border-radius:999px;font-size:12px;border:1px solid ${V2_TOKENS.line2};background:${active ? "rgba(255,255,255,0.7)" : "transparent"};color:${active ? V2_TOKENS.text : V2_TOKENS.textDim};display:flex;align-items:center;gap:6px;text-decoration:none;font-family:${value === "" ? V2_TOKENS.text : "'JetBrains Mono', monospace"};font-weight:${active ? 600 : 500}`;
+  const dot = color
+    ? `<span style="width:7px;height:7px;background:${color};border-radius:50%;display:inline-block;box-shadow:inset 0 1px 0 rgba(255,255,255,0.45),0 0 0 2px ${color}30"></span>`
+    : "";
+  if (disabled) {
+    return (
+      <a
+        href={CAPABILITY_ROUTING_DOC}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Routing mode `capability:*` is spec'd but not yet implemented (plexus entities:8r7p8odnnl1ys956xp5n). Click to open the design spec."
+        style={`${baseStyle};opacity:0.45;cursor:help`}
+      >
+        {color && <span style={`width:7px;height:7px;background:${color};border-radius:50%;display:inline-block`} />}
+        {label} <span style={`font-size:10px;color:${V2_TOKENS.textMute}`}>· spec'd</span>
+      </a>
+    );
+  }
+  const href = buildUrl("/messages", { routing: value || undefined, agent: agentFilter, q: query });
   return (
-    <a href={href} style={`padding:6px 12px;border-radius:999px;font-size:12px;border:1px solid ${V2_TOKENS.line2};background:${active ? "rgba(255,255,255,0.7)" : "transparent"};color:${active ? V2_TOKENS.text : V2_TOKENS.textDim};display:flex;align-items:center;gap:6px;text-decoration:none`}>
-      {color && <span style={`width:6px;height:6px;background:${color};display:inline-block`} />}
+    <a href={href} style={baseStyle}>
+      {color && <span style={`width:7px;height:7px;background:${color};border-radius:50%;display:inline-block`} />}
       {label}
     </a>
   );
 };
 
 export const V2MessagesPage: FC<V2MessagesProps> = ({
-  result, filterAgent, filterType, query, agentIds, agentRoles, userRole, csrfToken,
+  result, filterAgent, filterRouting, query, agentIds, agentRoles, userRole, csrfToken,
 }) => {
   const { data: messages, total, has_more, offset, limit } = result;
-  const filtered = (filterType
-    ? messages.filter((m) => m.type === filterType || (filterType === "incident_response" && m.type.startsWith("incident_")))
-    : messages)
+  const filtered = messages
+    .filter((m) => !filterRouting || routingOf(m.to) === filterRouting)
     .filter((m) => !query || m.context.toLowerCase().includes(query.toLowerCase()));
   const prevOff = Math.max(0, offset - limit);
   const nextOff = offset + limit;
@@ -83,49 +117,59 @@ export const V2MessagesPage: FC<V2MessagesProps> = ({
   return (
     <V2Layout title="Messages" active="MESSAGES" userRole={userRole} csrfToken={csrfToken}>
       <div style="padding:24px 32px">
-        <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:16px">
+        <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:4px">
           <h1 class="v2-h1">Messages</h1>
           <span style={`color:${V2_TOKENS.textMute};font-family:${V2_TOKENS.text}`}>{total}</span>
           <div style="flex:1" />
           <V2Btn href="/conversations">Threads</V2Btn>
         </div>
+        <p style={`color:${V2_TOKENS.textDim};margin:0 0 16px;font-size:12.5px;font-family:${V2_TOKENS.text}`}>
+          read-only · payload ≤ 256 KB · context ≤ 2048 chars · <code>from</code> set server-side · 60 msg/min global cap
+        </p>
 
         <form method="get" action="/messages" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-          <input class="v2-input" type="text" name="q" placeholder="Search context…" value={query ?? ""} style="width:280px" />
+          <input class="v2-input" type="text" name="q" placeholder="Search context, correlation_id…" value={query ?? ""} style="width:320px" />
           <input class="v2-input v2-input--mono" type="text" name="agent" placeholder="from/to filter" value={filterAgent ?? ""} style="width:180px" />
-          {filterType && <input type="hidden" name="type" value={filterType} />}
+          {filterRouting && <input type="hidden" name="routing" value={filterRouting} />}
           <V2Btn type="submit">Apply</V2Btn>
-          {(filterAgent || query) && <V2Btn href={buildUrl("/messages", { type: filterType })} kind="ghost">clear</V2Btn>}
+          {(filterAgent || query) && <V2Btn href={buildUrl("/messages", { routing: filterRouting })} kind="ghost">clear</V2Btn>}
           <div style="flex:1" />
-          {TYPE_FILTERS.map(([key, label, col]) => (
-            <TypeChip type={key} label={label} color={col} active={(filterType ?? "") === key} agentFilter={filterAgent} query={query} />
+          {ROUTING_FILTERS.map(([value, label, col, disabled]) => (
+            <RoutingChip
+              value={value} label={label} color={col} disabled={disabled}
+              active={(filterRouting ?? "") === value && !disabled}
+              agentFilter={filterAgent} query={query}
+            />
           ))}
         </form>
 
         <V2Card>
-          <div style={`display:grid;grid-template-columns:90px 1.2fr 24px 1.2fr 110px 70px 2fr;padding:10px 16px;font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.08em;text-transform:uppercase;border-bottom:1px solid ${V2_TOKENS.line};gap:12px`}>
-            <span>Time</span><span>From</span><span></span><span>To</span><span>Type</span><span>Prio</span><span>Context</span>
+          <div style={`display:grid;grid-template-columns:80px 1.1fr 90px 1.3fr 110px 60px 1.6fr;padding:10px 16px;font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.08em;text-transform:uppercase;border-bottom:1px solid ${V2_TOKENS.line};gap:12px`}>
+            <span>Time</span><span>From</span><span>Routing</span><span>To</span><span>Type</span><span>Prio</span><span>Context · pflicht</span>
           </div>
           {filtered.length === 0 ? (
             <div style={`padding:40px;text-align:center;color:${V2_TOKENS.textMute};font-size:13px`}>
               No messages match the current filter.
             </div>
           ) : filtered.map((m, i) => {
-            const isBroadcast = m.to === "broadcast";
+            const r = routingOf(m.to);
+            const rc = routingColor(r);
             return (
-              <div style={`display:grid;grid-template-columns:90px 1.2fr 24px 1.2fr 110px 70px 2fr;padding:10px 16px;align-items:center;gap:12px;font-size:13px;${i < filtered.length - 1 ? `border-bottom:1px solid ${V2_TOKENS.line};` : ""}`}>
-                <span style={`color:${V2_TOKENS.textMute};font-size:12px;font-family:${V2_TOKENS.text}`}>{fmtDayHM(m.created_at)}</span>
+              <div style={`display:grid;grid-template-columns:80px 1.1fr 90px 1.3fr 110px 60px 1.6fr;padding:10px 16px;align-items:center;gap:12px;font-size:13px;${i < filtered.length - 1 ? `border-bottom:1px solid ${V2_TOKENS.line};` : ""}`}>
+                <span style={`color:${V2_TOKENS.textMute};font-size:11.5px;font-family:${V2_TOKENS.text}`}>{fmtDayHM(m.created_at)}</span>
                 <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
                   <V2Avatar agentId={agentIds[m.from] ?? m.from} role={agentRoles[m.from] ?? undefined} size={18} />
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{m.from}</span>
+                  <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{m.from}</span>
                 </div>
-                <span style={`color:${V2_TOKENS.textMute};text-align:center`}>→</span>
-                {isBroadcast ? (
-                  <span style={`color:${V2_TOKENS.warn};font-size:11px;font-family:${V2_TOKENS.text};letter-spacing:0.05em;text-transform:uppercase`}>※ broadcast</span>
+                <V2Tag color={rc}>{r}</V2Tag>
+                {r === "broadcast" ? (
+                  <span style={`color:${V2_TOKENS.warn};font-size:11.5px;font-family:${V2_TOKENS.text};letter-spacing:0.05em;text-transform:uppercase`}>※ all live</span>
+                ) : r === "capability" ? (
+                  <span style={`color:${V2_TOKENS.info};font-size:11.5px;font-family:${V2_TOKENS.text}`}>{m.to}</span>
                 ) : (
                   <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
                     <V2Avatar agentId={agentIds[m.to] ?? m.to} role={agentRoles[m.to] ?? undefined} size={18} />
-                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{m.to}</span>
+                    <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{m.to}</span>
                   </div>
                 )}
                 <V2Tag color={typeColor(m.type)}>{m.type}</V2Tag>
@@ -139,11 +183,11 @@ export const V2MessagesPage: FC<V2MessagesProps> = ({
         {(offset > 0 || has_more) && (
           <div style={`display:flex;align-items:center;gap:14px;padding:18px 4px;font-size:12.5px;color:${V2_TOKENS.textMute}`}>
             {offset > 0
-              ? <V2Btn href={buildUrl("/messages", { agent: filterAgent, type: filterType, q: query, offset: String(prevOff) })}>← Newer</V2Btn>
+              ? <V2Btn href={buildUrl("/messages", { agent: filterAgent, routing: filterRouting, q: query, offset: String(prevOff) })}>← Newer</V2Btn>
               : <span style={`color:${V2_TOKENS.line2}`}>← Newer</span>}
             <span style={`font-family:${V2_TOKENS.text}`}>{offset + 1}–{Math.min(offset + limit, total)} of {total}</span>
             {has_more
-              ? <V2Btn href={buildUrl("/messages", { agent: filterAgent, type: filterType, q: query, offset: String(nextOff) })}>Older →</V2Btn>
+              ? <V2Btn href={buildUrl("/messages", { agent: filterAgent, routing: filterRouting, q: query, offset: String(nextOff) })}>Older →</V2Btn>
               : <span style={`color:${V2_TOKENS.line2}`}>Older →</span>}
           </div>
         )}
