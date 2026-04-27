@@ -12,6 +12,7 @@ import { V2Layout } from "./layout.js";
 import { V2Card, V2Btn, V2Tag, V2Dot, V2Spark, V2Avatar, withAlpha } from "./components.js";
 import { V2_TOKENS } from "./tokens.js";
 import { layoutMesh, type LayoutNode, type LayoutEdge, type Point } from "./layout-engine.js";
+import { renderAvatarSvgInner, renderAvatarSvg } from "./avatar.js";
 
 export interface V2HomeAgent {
   id: string;
@@ -152,22 +153,32 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
       {agents.map((ag) => {
         const p = positions.get(ag.name)!;
         const live = presenceById.get(ag.name) === "live";
-        const r = 6;
+        const N = 24;             // displayed avatar size in topology px-units
+        const half = N / 2;
+        const ringR = half + 4;   // pulse ring radius
+        const inner = renderAvatarSvgInner(ag.id, ag.role ?? undefined);
         return (
           <g key={ag.id} transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}>
             {live && (
-              <circle r={r + 5} fill={V2_TOKENS.accent} opacity="0.18">
-                <animate attributeName="r" values={`${r + 2};${r + 8};${r + 2}`} dur="2s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.28;0.06;0.28" dur="2s" repeatCount="indefinite" />
+              <circle r={ringR} fill={V2_TOKENS.accent} opacity="0.18">
+                <animate attributeName="r" values={`${ringR - 3};${ringR + 4};${ringR - 3}`} dur="2s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.32;0.06;0.32" dur="2s" repeatCount="indefinite" />
               </circle>
             )}
-            <rect x={-r} y={-r} width={r * 2} height={r * 2}
-              fill={`oklch(0.7 0.08 ${hueFor(ag.name)})`}
+            {/* Hue-tinted backdrop square to keep the silhouette readable
+                even when many tiny avatars sit close together. */}
+            <rect x={-half - 1} y={-half - 1} width={N + 2} height={N + 2}
+              rx="4" ry="4"
+              fill={`oklch(0.92 0.06 ${hueFor(ag.name)})`}
               stroke={live ? V2_TOKENS.accent : V2_TOKENS.line2}
-              stroke-width="1" />
-            <text y={r + 12} text-anchor="middle" font-size="10"
-              font-family={V2_TOKENS.text}
-              style={`font-family:${V2_TOKENS.text};fill:${V2_TOKENS.textDim}`}>
+              stroke-width={live ? "1.5" : "1"} />
+            {/* Avatar pixel-art embedded as nested rects, scaled from 32→N */}
+            <g transform={`translate(${-half},${-half}) scale(${N / 32})`}
+               shape-rendering="crispEdges">
+              {raw(inner)}
+            </g>
+            <text y={half + 12} text-anchor="middle" font-size="10"
+              style={`font-family:${V2_TOKENS.text};fill:${V2_TOKENS.textDim};font-weight:${live ? 600 : 500}`}>
               {ag.name}
             </text>
           </g>
@@ -254,27 +265,104 @@ function previewPayload(raw: string, max: number = 240): string {
 }
 
 // ── SSE hydration script ───────────────────────────────────────────
+// Subscribes to /sse/threads/:id and appends a bubble matching the
+// server-rendered ThreadBubble exactly: avatar (cloned from a hidden
+// pool), name + timestamp header, hue-tinted bubble with corner cut on
+// the sender side. Sender vs. receiver decided by participants[0] which
+// is embedded as `data-thread-a` on the SSE container.
 const SSE_SCRIPT = (correlationId: string) => raw(`<script>
 (function(){
   if (typeof EventSource === 'undefined') return;
-  var box = document.querySelector('[data-sse-thread="${correlationId}"]');
+  var box  = document.querySelector('[data-sse-thread="' + ${JSON.stringify(correlationId)} + '"]');
   if (!box) return;
-  var es = new EventSource('/sse/threads/${correlationId}');
-  es.addEventListener('message', function(ev){
+  var pool = document.getElementById('v2-avatar-pool');
+  var threadA = (box.dataset.threadA || '').toLowerCase();
+
+  function getAvatar(name) {
+    if (!pool) return null;
+    var el = pool.querySelector('[data-name="' + CSS.escape(name.toLowerCase()) + '"]');
+    return el ? el.firstElementChild : null;
+  }
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function hueFor(name) {
+    var h = 2166136261;
+    for (var i = 0; i < name.length; i++) {
+      h ^= name.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ((h >>> 0) % 360);
+  }
+  function previewPayload(s) {
+    if (!s) return '';
+    try {
+      var o = JSON.parse(s);
+      if (typeof o === 'string') return o;
+      if (o && typeof o === 'object') {
+        var ks = ['text', 'message', 'summary', 'payload'];
+        for (var i = 0; i < ks.length; i++) if (typeof o[ks[i]] === 'string') return o[ks[i]];
+      }
+    } catch (e) { /* fall through */ }
+    return s;
+  }
+
+  function buildBubble(msg) {
+    var isLeft = !threadA || msg.from.toLowerCase() === threadA;
+    var hue = hueFor(msg.from);
+    var tint = 'oklch(0.94 0.06 ' + hue + ')';
+    var corner = isLeft ? 'border-bottom-left-radius:3px' : 'border-bottom-right-radius:3px';
+
+    var wrapper = document.createElement('div');
+    wrapper.setAttribute('data-msg-id', msg.id);
+    wrapper.style.cssText = 'display:flex;flex-direction:' + (isLeft ? 'row' : 'row-reverse') + ';gap:9px;margin-bottom:10px;align-items:flex-end;animation:v2-bubble-in 0.25s ease-out';
+
+    var avBox = document.createElement('span');
+    avBox.style.cssText = 'display:inline-flex;width:20px;height:20px;flex-shrink:0;align-items:center;justify-content:center';
+    var av = getAvatar(msg.from);
+    if (av) avBox.appendChild(av.cloneNode(true));
+
+    var col = document.createElement('div');
+    col.style.cssText = 'max-width:78%;display:flex;flex-direction:column;align-items:' + (isLeft ? 'flex-start' : 'flex-end');
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:baseline;gap:6px;margin-bottom:3px;flex-direction:' + (isLeft ? 'row' : 'row-reverse');
+    var name = document.createElement('span');
+    name.style.cssText = 'font-weight:600;font-size:12px';
+    name.textContent = msg.from;
+    var time = document.createElement('span');
+    time.style.cssText = 'color:rgba(10,10,10,0.42);font-size:10.5px;font-family:"JetBrains Mono",monospace';
+    time.textContent = fmtTime(msg.created_at);
+    head.appendChild(name); head.appendChild(time);
+
+    var bub = document.createElement('div');
+    bub.style.cssText = 'background:' + tint + ';border:1px solid rgba(20,16,8,0.10);border-radius:12px;' + corner + ';padding:7px 11px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;box-shadow:0 1px 0 rgba(255,255,255,0.85) inset, 0 6px 16px rgba(20,16,8,0.07), 0 1px 0 rgba(20,16,8,0.12)';
+    bub.textContent = previewPayload(msg.payload);
+
+    col.appendChild(head); col.appendChild(bub);
+    wrapper.appendChild(avBox); wrapper.appendChild(col);
+    return wrapper;
+  }
+
+  var es = new EventSource('/sse/threads/' + ${JSON.stringify(correlationId)});
+  es.addEventListener('message', function(ev) {
     try {
       var msg = JSON.parse(ev.data);
       if (box.querySelector('[data-msg-id="' + msg.id + '"]')) return;
-      var bubble = document.createElement('div');
-      bubble.style.cssText = 'padding:9px 13px;background:#fff;border:1px solid rgba(0,0,0,0.08);border-radius:10px;margin-bottom:8px;font-size:12.5px';
-      bubble.setAttribute('data-msg-id', msg.id);
-      bubble.textContent = msg.from + ': ' + (msg.payload || '');
-      box.appendChild(bubble);
+      box.appendChild(buildBubble(msg));
       box.scrollTop = box.scrollHeight;
     } catch (e) { /* ignore malformed events */ }
   });
   window.addEventListener('beforeunload', function(){ es.close(); });
 })();
-</script>`);
+</script>
+<style>
+@keyframes v2-bubble-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</style>`);
 
 // ── Page ───────────────────────────────────────────────────────────
 export const V2HomePage: FC<V2HomeProps> = ({
@@ -342,7 +430,9 @@ export const V2HomePage: FC<V2HomeProps> = ({
           <V2Card title="Live thread"
             sub={liveThread ? liveThread.correlation_id : "no active thread"}
             right={<V2Tag color={V2_TOKENS.accent2}>SSE</V2Tag>}>
-            <div data-sse-thread={liveThread?.correlation_id ?? ""}
+            <div
+              data-sse-thread={liveThread?.correlation_id ?? ""}
+              data-thread-a={liveThread?.participants[0] ?? ""}
               style="padding:14px 16px;max-height:340px;overflow-y:auto">
               {liveThread && liveThread.messages.length > 0 ? (
                 liveThread.messages.map((m) => {
@@ -428,6 +518,18 @@ export const V2HomePage: FC<V2HomeProps> = ({
         </div>
       </div>
 
+      {/* Hidden avatar pool — SSE script clones from here to avoid
+          re-running the avatar generator client-side. One entry per agent
+          known at page render. Unknown senders fall back to no avatar. */}
+      {liveThread && (
+        <div id="v2-avatar-pool" hidden>
+          {agents.map((a) => (
+            <div data-name={a.name.toLowerCase()}>
+              {raw(renderAvatarSvg(a.id, a.role ?? undefined, { size: 20 }))}
+            </div>
+          ))}
+        </div>
+      )}
       {liveThread && SSE_SCRIPT(liveThread.correlation_id)}
     </V2Layout>
   );
