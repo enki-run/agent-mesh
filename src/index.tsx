@@ -37,7 +37,7 @@ import { V2HomePage } from "./views/v2/home.js";
 import { AgentsPage } from "./views/agents.js";
 import { MessagesPage } from "./views/messages.js";
 import { ActivityPage } from "./views/activity.js";
-import { ConversationsPage } from "./views/conversations.js";
+import { V2ConversationsPage } from "./views/v2/conversations.js";
 
 // --- Load and validate configuration (fail-fast on missing/invalid secrets) ---
 // Closes code-review findings C2 (empty MESH_ADMIN_TOKEN bypass) and C3
@@ -591,16 +591,17 @@ app.get("/conversations", (c) => {
 
   const offsetParam = parseInt(c.req.query("offset") ?? "0", 10);
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
-  const limit = LIMITS.PAGINATION_DEFAULT;
-
-  const result = listConversations(db, { limit, offset });
-
+  const result = listConversations(db, { limit: LIMITS.PAGINATION_DEFAULT, offset });
+  const allAgents = agents.list();
   return c.html(
-    <ConversationsPage
+    <V2ConversationsPage
       result={result}
+      selectedId={c.req.query("id")}
+      query={c.req.query("q")}
+      agentIds={Object.fromEntries(allAgents.map((a) => [a.name, a.id]))}
+      agentRoles={Object.fromEntries(allAgents.map((a) => [a.name, a.role]))}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
