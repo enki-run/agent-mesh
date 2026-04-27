@@ -202,6 +202,30 @@ export class NatsService {
     return results;
   }
 
+  /**
+   * Stream-state snapshot for the dashboard KPI strip. Reads
+   * `MESH_MESSAGES` from JetStream and returns a small structured object
+   * the v2 home page can show without leaking the raw nats.js types.
+   * Errors (broker down, stream missing) bubble up — the caller should
+   * fall back to nulls in that case.
+   */
+  async getStreamStats(): Promise<{
+    name: string;
+    bytes: number;
+    messages: number;
+    maxAgeSeconds: number;
+    maxBytes: number;
+  }> {
+    const info = await this.jsm.streams.info(STREAM_NAME);
+    return {
+      name: STREAM_NAME,
+      bytes: info.state.bytes,
+      messages: info.state.messages,
+      maxAgeSeconds: Math.round((info.config.max_age ?? 0) / 1_000_000_000),
+      maxBytes: info.config.max_bytes ?? 0,
+    };
+  }
+
   async updatePresence(
     agentName: string,
     data: Record<string, unknown>,

@@ -292,7 +292,7 @@ function cookieSecretFor(env: Env): string {
 app.get("/", async (c) => {
   const agent = c.get("agent");
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
-  const data = await loadV2HomeData({ db, presence, activity });
+  const data = await loadV2HomeData({ db, presence, activity, nats });
   return c.html(
     <V2HomePage {...data} userRole={agent?.role ?? undefined} csrfToken={csrfToken} />,
   );
@@ -500,7 +500,7 @@ app.get("/messages", (c) => {
     <V2MessagesPage
       result={result}
       filterAgent={filterAgent}
-      filterType={c.req.query("type")}
+      filterRouting={c.req.query("routing")}
       query={c.req.query("q")}
       agentIds={Object.fromEntries(allAgents.map((a) => [a.name, a.id]))}
       agentRoles={Object.fromEntries(allAgents.map((a) => [a.name, a.role]))}

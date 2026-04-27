@@ -40,10 +40,12 @@ export interface V2HomeProps {
   stats: {
     agentsTotal: number;
     agentsLive: number;
+    agentsStale: number;
     agentsActive: number;
     msg24h: number;
     threads: number;
     incidents24h: number;
+    stream: { bytes: number; messages: number; maxAgeSeconds: number; maxBytes: number } | null;
   };
   agents: V2HomeAgent[];
   edges: MeshEdge[];
@@ -51,6 +53,19 @@ export interface V2HomeProps {
   activities: Activity[];
   userRole?: string;
   csrfToken?: string;
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(0)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function fmtSeconds(s: number): string {
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -163,14 +178,22 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
 };
 
 // ── KPI card ───────────────────────────────────────────────────────
-const KpiCard: FC<{ label: string; value: number | string; sub: string; accent?: string; spark?: number[] }> = ({ label, value, sub, accent, spark }) => {
-  const borderTop = accent
-    ? `border-top: 2px solid ${accent};`
-    : `border-top: ${V2_TOKENS.line};`;
+// Mesh-native KPI card with glossy fill + optional accent stripe at top.
+const KpiCard: FC<{
+  label: string;
+  value: number | string;
+  sub: string;
+  accent?: string;
+  spark?: number[];
+}> = ({ label, value, sub, accent, spark }) => {
+  const stripeStyle = accent
+    ? `position:absolute;top:0;left:14px;right:14px;height:2px;background:linear-gradient(90deg, ${withAlpha(accent, 0)}, ${accent} 40%, ${accent} 60%, ${withAlpha(accent, 0)});border-radius:2px;`
+    : "display:none";
   return (
-    <div class="v2-card lift-sm" style={`padding:14px 16px;border-radius:${V2_TOKENS.radiusXL}px;${borderTop}`}>
-      <div style={`font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.1em`}>{label}</div>
-      <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-top:6px">
+    <div class="v2-card" style={`padding:14px 16px;border-radius:${V2_TOKENS.radiusXL}px;overflow:hidden`}>
+      <span style={stripeStyle} />
+      <div style={`position:relative;font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.1em;font-weight:600`}>{label}</div>
+      <div style="position:relative;display:flex;align-items:flex-end;justify-content:space-between;margin-top:6px">
         <div>
           <div style="font-size:28px;font-weight:700;letter-spacing:-0.03em;line-height:1">{value}</div>
           <div style={`font-size:11.5px;color:${V2_TOKENS.textDim};margin-top:4px`}>{sub}</div>
@@ -274,18 +297,37 @@ export const V2HomePage: FC<V2HomeProps> = ({
           </div>
         </div>
 
-        {/* KPI strip */}
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
-          <KpiCard label="ACTIVE" value={stats.agentsActive}
-            sub={`${stats.agentsLive} live`} accent={V2_TOKENS.accent2} />
-          <KpiCard label="MSG · 24H" value={stats.msg24h}
-            sub={`${(stats.msg24h / 60 / 24).toFixed(1)}/min avg`}
-            spark={agents.find((a) => a.heat.some((v) => v > 0))?.heat} />
-          <KpiCard label="THREADS" value={stats.threads}
-            sub={`${liveThread ? "1 live" : "idle"}`} />
-          <KpiCard label="INCIDENTS" value={stats.incidents24h}
-            sub={stats.incidents24h === 0 ? "all clear" : "needs review"}
-            accent={V2_TOKENS.warn} />
+        {/* KPI strip — mesh-native: agent presence, message rate, thread
+            grouping rule, NATS stream usage. */}
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
+          <KpiCard
+            label="AGENTS · LIVE"
+            value={`${stats.agentsLive}/${stats.agentsTotal}`}
+            sub={`${stats.agentsStale} stale · ${stats.agentsActive} active token`}
+            accent={V2_TOKENS.accent2}
+          />
+          <KpiCard
+            label="MSG · 24H"
+            value={stats.msg24h}
+            sub={`${(stats.msg24h / 60 / 24).toFixed(1)}/min avg · 60 msg/min cap`}
+            accent={V2_TOKENS.accent}
+            spark={agents.find((a) => a.heat.some((v) => v > 0))?.heat}
+          />
+          <KpiCard
+            label="THREADS"
+            value={stats.threads}
+            sub="correlation_id-grouped"
+          />
+          <KpiCard
+            label="NATS · STREAM"
+            value={stats.stream ? fmtBytes(stats.stream.bytes) : "—"}
+            sub={
+              stats.stream
+                ? `MESH_MESSAGES · ${fmtSeconds(stats.stream.maxAgeSeconds)} · ${fmtBytes(stats.stream.maxBytes)}`
+                : "NATS unreachable"
+            }
+            accent={V2_TOKENS.info}
+          />
         </div>
 
         {/* Mesh + Live thread row */}
