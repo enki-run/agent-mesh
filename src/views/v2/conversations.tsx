@@ -76,7 +76,7 @@ const ThreadListItem: FC<{
 
   return (
     <a href={`/conversations?id=${encodeURIComponent(thread.thread_id)}`}
-      style={`display:block;padding:11px 18px;border-bottom:1px solid ${V2_TOKENS.line};text-decoration:none;color:inherit;background:${selected ? V2_TOKENS.surface2 : "transparent"};border-left:2px solid ${selected ? V2_TOKENS.accent : "transparent"}`}>
+      style={`display:block;padding:11px 18px;border-bottom:1px solid ${V2_TOKENS.line};text-decoration:none;color:inherit;background:${selected ? `linear-gradient(180deg, rgba(255,61,46,0.08), rgba(255,61,46,0.03))` : "transparent"};border-left:2px solid ${selected ? V2_TOKENS.accent : "transparent"}`}>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
         {a && <V2Avatar agentId={aId} role={aRole ?? undefined} size={16} />}
         <span style={`color:${V2_TOKENS.textMute};font-size:11px`}>→</span>
@@ -118,17 +118,26 @@ const ThreadDetail: FC<{
             {thread.participants.length > 0 ? thread.participants.slice(0, PARTICIPANT_LIMIT).join(" → ") : "Empty thread"}
           </div>
           <div style={`font-size:11.5px;color:${V2_TOKENS.textMute};font-family:${V2_TOKENS.text}`}>
-            {thread.thread_id} · {thread.message_count} msg · last activity {fmtRel(thread.last_activity)}
+            correlation_id · {thread.thread_id} · {thread.message_count} msg · last activity {fmtRel(thread.last_activity)}
           </div>
         </div>
+        <span class="v2-tag" style={`color:${V2_TOKENS.textMute};background:linear-gradient(180deg, ${V2_TOKENS.surface2}, ${V2_TOKENS.surface3});border-color:${V2_TOKENS.line2};box-shadow:inset 0 1px 0 rgba(255,255,255,0.55)`}>read-only · ADR-004</span>
       </div>
 
       <div style="flex:1;padding:24px 32px;overflow-y:auto">
         {thread.messages.map((m) => {
           const a = thread.participants[0];
           const isLeft = m.from === a;
-          const tint = `oklch(0.94 0.06 ${hueFor(m.from)})`;
+          const hue = hueFor(m.from);
+          // Bubble: 2-stop oklch gradient + oklch border + 4-layer shadow + sheen overlay
+          const tintBg = `linear-gradient(180deg, oklch(0.97 0.05 ${hue}) 0%, oklch(0.93 0.07 ${hue}) 100%)`;
+          const tintBorder = `oklch(0.78 0.10 ${hue})`;
           const corner = isLeft ? "border-bottom-left-radius:4px;" : "border-bottom-right-radius:4px;";
+          const bubbleShadow =
+            "0 1px 0 rgba(255,255,255,0.85) inset," +
+            " 0 -1px 0 rgba(20,16,8,0.05) inset," +
+            " 0 6px 14px rgba(20,16,8,0.07)," +
+            " 0 1px 0 rgba(20,16,8,0.10)";
           return (
             <div style={`display:flex;flex-direction:${isLeft ? "row" : "row-reverse"};gap:12px;margin-bottom:18px;align-items:flex-end`}>
               <V2Avatar agentId={agentIds[m.from] ?? m.from} role={agentRoles[m.from] ?? undefined} size={28} />
@@ -137,8 +146,9 @@ const ThreadDetail: FC<{
                   <span style="font-weight:600;font-size:12.5px">{m.from}</span>
                   <span style={`font-size:10.5px;color:${V2_TOKENS.textMute};font-family:${V2_TOKENS.text}`}>{fmtTime(m.created_at)}</span>
                 </div>
-                <div style={`background:${tint};border:1px solid ${V2_TOKENS.line2};border-radius:14px;${corner}padding:10px 14px;font-size:13.5px;line-height:1.55;white-space:pre-wrap`}>
-                  {previewPayload(m.payload, 4000)}
+                <div style={`position:relative;background:${tintBg};border:1px solid ${tintBorder};border-radius:14px;${corner}padding:10px 14px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;box-shadow:${bubbleShadow}`}>
+                  <span class="v2-sheen" style="border-radius:14px" />
+                  <span style="position:relative">{previewPayload(m.payload, 4000)}</span>
                 </div>
                 {m.context && (
                   <div style={`font-size:10.5px;color:${V2_TOKENS.textMute};margin-top:4px;font-family:${V2_TOKENS.text}`}>

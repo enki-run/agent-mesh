@@ -48,4 +48,15 @@ describe("V2Layout palette", () => {
     // is used by checking that quotes in the autocomplete attribute survived.
     expect(html).toContain('autocomplete="off"');
   });
+
+  it("includes mesh MCP-tool entries with signatures", async () => {
+    const html = await renderLayout({ active: "HOME", children: "x" });
+    expect(html).toContain("mesh_register");
+    expect(html).toContain("mesh_send");
+    expect(html).toContain("mesh_status");
+    expect(html).toContain("mesh_history");
+    // Sig (hint) and desc render
+    expect(html).toContain("v2-pal-desc");
+    expect(html).toContain("→ message_id");
+  });
 });
