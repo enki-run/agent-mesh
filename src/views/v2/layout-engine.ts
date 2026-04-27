@@ -30,6 +30,10 @@ export interface LayoutOptions {
   gravity?: number;
   /** Padding kept clear from the canvas border. */
   padding?: number;
+  /** Initial-placement radius as a fraction of min(width, height).
+   *  Higher values start nodes further from centre — useful when the
+   *  graph has many nodes and gravity tends to over-cluster them. */
+  initialRadiusFactor?: number;
   /** Seed for deterministic initial placement. */
   seed?: string;
 }
@@ -42,6 +46,7 @@ const DEFAULTS: Required<Omit<LayoutOptions, "seed">> & { seed: string } = {
   linkDistance: 90,
   gravity: 0.04,
   padding: 18,
+  initialRadiusFactor: 0.32,
   seed: "agent-mesh-v2",
 };
 
@@ -85,7 +90,7 @@ export function layoutMesh(
   const rng = mulberry32(hashString(o.seed));
   const cx = o.width / 2;
   const cy = o.height / 2;
-  const r0 = Math.min(o.width, o.height) * 0.32;
+  const r0 = Math.min(o.width, o.height) * o.initialRadiusFactor;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i]!;
     const angle = (i / nodes.length) * Math.PI * 2 + rng() * 0.5;

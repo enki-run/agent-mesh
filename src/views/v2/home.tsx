@@ -117,14 +117,19 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
 
   const nodes: LayoutNode[] = agents.map((a) => ({ id: a.name }));
   const layoutEdges: LayoutEdge[] = edges.map((e) => ({ from: e.from, to: e.to, weight: e.count }));
-  // Tweaked from defaults: longer link distance + slightly stronger
-  // repulsion so 13+ agents spread out instead of clustering centre.
+  // Aggressive spread for 12+ agents on the 680x360 canvas: weak gravity
+  // so nodes don't snap back to centre, strong repulsion + long edges to
+  // push them apart, generous initial radius so they start near the rim
+  // instead of converging from a small inner ring.
   const positions = layoutMesh(nodes, layoutEdges, {
     width: MESH_W,
     height: MESH_H,
-    linkDistance: 130,
-    charge: 2400,
-    padding: 32,
+    linkDistance: 150,
+    charge: 3500,
+    gravity: 0.012,
+    padding: 36,
+    initialRadiusFactor: 0.45,
+    iterations: 320,
   });
   const now = Date.now();
   const maxCount = Math.max(1, ...edges.map((e) => e.count));
