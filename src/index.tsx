@@ -36,8 +36,8 @@ import { streamSSE } from "hono/streaming";
 import { LoginPage } from "./views/login.js";
 import { V2HomePage } from "./views/v2/home.js";
 import { V2AgentsPage } from "./views/v2/agents.js";
-import { MessagesPage } from "./views/messages.js";
-import { ActivityPage } from "./views/activity.js";
+import { V2MessagesPage } from "./views/v2/messages.js";
+import { V2ActivityPage } from "./views/v2/activity.js";
 import { V2ConversationsPage } from "./views/v2/conversations.js";
 
 // --- Load and validate configuration (fail-fast on missing/invalid secrets) ---
@@ -491,28 +491,21 @@ app.post("/agents/delete", async (c) => {
 // --- Dashboard: Messages ---
 app.get("/messages", (c) => {
   const agent = c.get("agent");
-  const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
-
   const filterAgent = c.req.query("agent") || undefined;
   const offsetParam = parseInt(c.req.query("offset") ?? "0", 10);
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
-  const limit = LIMITS.PAGINATION_DEFAULT;
-
-  const result = listMessages(db, { limit, offset, agent: filterAgent });
-
-  // Build agent name -> avatar map
-  const agentAvatars: Record<string, string> = {};
-  for (const a of agents.list()) {
-    if (a.avatar) agentAvatars[a.name] = a.avatar;
-  }
-
+  const result = listMessages(db, { limit: LIMITS.PAGINATION_DEFAULT, offset, agent: filterAgent });
+  const allAgents = agents.list();
   return c.html(
-    <MessagesPage
+    <V2MessagesPage
       result={result}
-      userRole={agent?.role ?? undefined}
-      csrfToken={csrfToken}
       filterAgent={filterAgent}
-      agentAvatars={agentAvatars}
+      filterType={c.req.query("type")}
+      query={c.req.query("q")}
+      agentIds={Object.fromEntries(allAgents.map((a) => [a.name, a.id]))}
+      agentRoles={Object.fromEntries(allAgents.map((a) => [a.name, a.role]))}
+      userRole={agent?.role ?? undefined}
+      csrfToken={generateCsrfToken(cookieSecretFor(c.env))}
     />,
   );
 });
@@ -520,20 +513,19 @@ app.get("/messages", (c) => {
 // --- Dashboard: Activity Log ---
 app.get("/activity", (c) => {
   const agent = c.get("agent");
-  const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
-
   const offsetParam = parseInt(c.req.query("offset") ?? "0", 10);
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
-  const limit = LIMITS.PAGINATION_DEFAULT;
-
-  const result = activity.list({ limit, offset });
-
+  const result = activity.list({ limit: LIMITS.PAGINATION_DEFAULT, offset });
+  const allAgents = agents.list();
   return c.html(
-    <ActivityPage
+    <V2ActivityPage
       result={result}
+      filterEntity={c.req.query("entity")}
+      filterRange={c.req.query("range")}
+      agentIds={Object.fromEntries(allAgents.map((a) => [a.name, a.id]))}
+      agentRoles={Object.fromEntries(allAgents.map((a) => [a.name, a.role]))}
       userRole={agent?.role ?? undefined}
-      csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
+      csrfToken={generateCsrfToken(cookieSecretFor(c.env))}
     />,
   );
 });
