@@ -101,8 +101,8 @@ function hueFor(name: string): number {
 }
 
 // ── Mesh-topology SVG ──────────────────────────────────────────────
-const MESH_W = 520;
-const MESH_H = 260;
+const MESH_W = 680;
+const MESH_H = 360;
 const RECENT_MS = 2 * 60 * 60 * 1000; // 2h
 const PULSE_MS = 5 * 60 * 1000;       // 5min
 
@@ -117,7 +117,15 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
 
   const nodes: LayoutNode[] = agents.map((a) => ({ id: a.name }));
   const layoutEdges: LayoutEdge[] = edges.map((e) => ({ from: e.from, to: e.to, weight: e.count }));
-  const positions = layoutMesh(nodes, layoutEdges, { width: MESH_W, height: MESH_H });
+  // Tweaked from defaults: longer link distance + slightly stronger
+  // repulsion so 13+ agents spread out instead of clustering centre.
+  const positions = layoutMesh(nodes, layoutEdges, {
+    width: MESH_W,
+    height: MESH_H,
+    linkDistance: 130,
+    charge: 2400,
+    padding: 32,
+  });
   const now = Date.now();
   const maxCount = Math.max(1, ...edges.map((e) => e.count));
   const presenceById = new Map(agents.map((a) => [a.name, a.presence]));
@@ -153,7 +161,7 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
       {agents.map((ag) => {
         const p = positions.get(ag.name)!;
         const live = presenceById.get(ag.name) === "live";
-        const N = 24;             // displayed avatar size in topology px-units
+        const N = 36;             // displayed avatar size in topology px-units
         const half = N / 2;
         const ringR = half + 4;   // pulse ring radius
         const inner = renderAvatarSvgInner(ag.id, ag.role ?? undefined);
@@ -177,7 +185,7 @@ const MeshGraph: FC<{ agents: V2HomeAgent[]; edges: MeshEdge[] }> = ({ agents, e
                shape-rendering="crispEdges">
               {raw(inner)}
             </g>
-            <text y={half + 12} text-anchor="middle" font-size="10"
+            <text y={half + 14} text-anchor="middle" font-size="11"
               style={`font-family:${V2_TOKENS.text};fill:${V2_TOKENS.textDim};font-weight:${live ? 600 : 500}`}>
               {ag.name}
             </text>
