@@ -28,16 +28,17 @@ import { setFlash, getFlash } from "./services/flash.js";
 import { checkHealth } from "./services/health.js";
 import { PresenceService } from "./services/presence.js";
 import { loadV2HomeData } from "./services/v2-home-data.js";
+import { loadV2AgentsData } from "./services/v2-agents-data.js";
 import { subscribeMessageEvents } from "./services/message-events.js";
 import { streamSSE } from "hono/streaming";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
 import { V2HomePage } from "./views/v2/home.js";
-import { AgentsPage } from "./views/agents.js";
+import { V2AgentsPage } from "./views/v2/agents.js";
 import { V2MessagesPage } from "./views/v2/messages.js";
 import { V2ActivityPage } from "./views/v2/activity.js";
-import { ConversationsPage } from "./views/conversations.js";
+import { V2ConversationsPage } from "./views/v2/conversations.js";
 
 // --- Load and validate configuration (fail-fast on missing/invalid secrets) ---
 // Closes code-review findings C2 (empty MESH_ADMIN_TOKEN bypass) and C3
@@ -140,26 +141,6 @@ app.use("*", async (c, next) => {
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-});
-
-// --- Static files (no auth) ---
-app.get("/avatars/:file", async (c) => {
-  const file = c.req.param("file");
-  if (!/^avatar-\d{2}\.png$/.test(file)) return c.text("Not found", 404);
-  const { readFile } = await import("fs/promises");
-  const { join, dirname } = await import("path");
-  const { fileURLToPath } = await import("url");
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  try {
-    let filePath = join(currentDir, "../public/avatars", file);
-    try { await import("fs/promises").then(f => f.access(filePath)); } catch {
-      filePath = join(currentDir, "../../public/avatars", file);
-    }
-    const data = await readFile(filePath);
-    return new Response(data, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" } });
-  } catch {
-    return c.text("Not found", 404);
-  }
 });
 
 // --- Health endpoint (no auth) ---
@@ -346,29 +327,20 @@ app.get("/sse/threads/:correlation_id", (c) => {
 // --- Dashboard: Agents (admin only) ---
 app.get("/agents", async (c) => {
   const agent = c.get("agent");
-  if (agent?.role !== "admin") {
-    return c.redirect("/");
-  }
+  if (agent?.role !== "admin") return c.redirect("/");
 
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
-  const flashKey = c.req.query("flash");
-  const flash = getFlash(flashKey);
-
-  // Same read-path as / and mesh_status: one presence.list() call per
-  // request so the admin table agrees with the rest of the dashboard.
-  const entries = await presence.list();
-  const agentsForView = entries.map((e) => ({
-    ...e.agent,
-    presence: e.presence,
-    last_seen_at: e.effectiveLastSeen,
-  }));
+  const flash = getFlash(c.req.query("flash"));
+  const agentsData = await loadV2AgentsData(db, presence);
 
   return c.html(
-    <AgentsPage
-      agents={agentsForView}
+    <V2AgentsPage
+      agents={agentsData}
       csrfToken={csrfToken}
       newToken={flash?.newToken}
       error={flash?.error}
+      inspectId={c.req.query("inspect")}
+      showNewForm={c.req.query("new") === "1"}
       userRole={agent.role}
     />,
   );
@@ -516,24 +488,6 @@ app.post("/agents/delete", async (c) => {
   return c.redirect("/agents");
 });
 
-app.post("/agents/set-avatar", async (c) => {
-  const agent = c.get("agent");
-  if (agent?.role !== "admin") return c.json({ error: "Forbidden" }, 403);
-
-  const body = await c.req.parseBody();
-  const id = body["id"] as string;
-  const avatar = (body["avatar"] as string)?.trim() || null;
-  const csrf = body["csrf"] as string;
-  const cookieSecret = cookieSecretFor(c.env);
-
-  if (!validateCsrfToken(csrf, cookieSecret)) return c.redirect("/agents");
-
-  if (id && avatar) {
-    db.prepare("UPDATE agents SET avatar = ?, updated_at = ? WHERE id = ?").run(avatar, new Date().toISOString(), id);
-  }
-  return c.redirect("/agents");
-});
-
 // --- Dashboard: Messages ---
 app.get("/messages", (c) => {
   const agent = c.get("agent");
@@ -583,16 +537,17 @@ app.get("/conversations", (c) => {
 
   const offsetParam = parseInt(c.req.query("offset") ?? "0", 10);
   const offset = isNaN(offsetParam) || offsetParam < 0 ? 0 : offsetParam;
-  const limit = LIMITS.PAGINATION_DEFAULT;
-
-  const result = listConversations(db, { limit, offset });
-
+  const result = listConversations(db, { limit: LIMITS.PAGINATION_DEFAULT, offset });
+  const allAgents = agents.list();
   return c.html(
-    <ConversationsPage
+    <V2ConversationsPage
       result={result}
+      selectedId={c.req.query("id")}
+      query={c.req.query("q")}
+      agentIds={Object.fromEntries(allAgents.map((a) => [a.name, a.id]))}
+      agentRoles={Object.fromEntries(allAgents.map((a) => [a.name, a.role]))}
       userRole={agent?.role ?? undefined}
       csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(agents.list().filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
     />,
   );
 });
