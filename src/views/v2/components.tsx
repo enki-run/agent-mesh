@@ -1,10 +1,20 @@
-// V2 primitives — Hono JSX components for Light-Brutalist screens.
+// V2 primitives — Hono JSX components for the Paper Glass dashboard.
 // Pair with src/views/v2/tokens.ts (CSS) and src/views/v2/avatar.ts (SVG generator).
 
 import type { FC } from "hono/jsx";
 import { raw } from "hono/html";
-import { V2_TOKENS } from "./tokens.js";
+import { V2_TOKENS, V2_BTN } from "./tokens.js";
 import { renderAvatarSvg, type AvatarRenderOptions } from "./avatar.js";
+
+// Specular-sheen overlay used on every glossy surface (cards, KPI tiles,
+// palette modal, top-bar). Renders as an absolutely-positioned div with
+// `mix-blend-mode: screen` so it brightens the underlying gradient.
+export const V2Sheen: FC<{ radius?: number }> = ({ radius }) => (
+  <div
+    class="v2-sheen"
+    style={radius != null ? `border-radius:${radius}px` : ""}
+  />
+);
 
 // ── Presence ────────────────────────────────────────────────────
 export type Presence = "live" | "stale" | "offline" | "never";
@@ -58,6 +68,7 @@ export const V2Card: FC<{
 }> = ({ title, sub, right, liftSm, children }) => {
   return (
     <div class={liftSm ? "v2-card lift-sm" : "v2-card"}>
+      <V2Sheen />
       {(title || right) && (
         <div class="v2-card-head">
           <div style="flex:1">
@@ -67,7 +78,7 @@ export const V2Card: FC<{
           {right}
         </div>
       )}
-      {children}
+      <div class="v2-card-body">{children}</div>
     </div>
   );
 };
@@ -90,14 +101,17 @@ export const V2Btn: FC<{
   return <button class={cls} type={type} onclick={onclick}>{children}</button>;
 };
 
-// ── Tag (token-tinted pill) ─────────────────────────────────────
+// ── Tag (token-tinted glossy pill) ──────────────────────────────
+// Two-stop gradient + double inset shadow gives the wet-glass look.
 export const V2Tag: FC<{ color?: string; children?: any }> = ({ color, children }) => {
   const c = color ?? V2_TOKENS.textDim;
-  const bg = withAlpha(c, 0.12);
+  const bg = `linear-gradient(180deg, ${withAlpha(c, 0.16)}, ${withAlpha(c, 0.10)})`;
+  const border = withAlpha(c, 0.32);
+  const shadow = `inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 ${withAlpha(c, 0.08)}`;
   return (
     <span
       class="v2-tag"
-      style={`color:${c};background:${bg};border-color:${withAlpha(c, 0.28)};`}
+      style={`color:${c};background:${bg};border-color:${border};box-shadow:${shadow}`}
     >
       {children}
     </span>

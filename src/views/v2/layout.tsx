@@ -3,7 +3,7 @@
 
 import type { FC } from "hono/jsx";
 import { raw } from "hono/html";
-import { V2_CSS } from "./tokens.js";
+import { V2_CSS, V2_TOKENS } from "./tokens.js";
 
 export type V2NavKey = "HOME" | "AGENTS" | "CONVOS" | "MESSAGES" | "LOG";
 
@@ -174,6 +174,50 @@ function defaultPaletteItems(userRole?: string): PaletteItem[] {
   return items;
 }
 
+// Responsive scaler: design renders at fixed width and CSS-scales down
+// for narrow viewports. Mirrors the prototype useDesignSize hook but as
+// vanilla JS sitting on top of the server-rendered shell.
+const SCALER_SCRIPT = raw(`<script>
+(function(){
+  var DESIGN = ${V2_TOKENS.shellWidth};
+  var COMPACT = ${V2_TOKENS.shellWidthCompact};
+  var BREAK = ${V2_TOKENS.compactBreakpoint};
+  var stage = document.querySelector('.v2-stage');
+  var scaler = document.querySelector('.v2-scaler');
+  var inner  = document.querySelector('.v2-shell');
+  if(!stage || !scaler || !inner) return;
+  var raf = 0;
+  function compute(){
+    var vw = window.innerWidth;
+    var compact = vw < BREAK;
+    var w = compact ? COMPACT : DESIGN;
+    var avail = Math.max(320, vw - 32);
+    var scale = Math.min(1, avail / w);
+    inner.style.setProperty('--v2-design-width', w + 'px');
+    scaler.style.width = w + 'px';
+    scaler.style.transform = 'scale(' + scale + ')';
+    stage.style.minHeight = (inner.offsetHeight * scale + 56) + 'px';
+  }
+  function schedule(){
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(compute);
+  }
+  window.addEventListener('resize', schedule);
+  if (window.ResizeObserver) {
+    new ResizeObserver(schedule).observe(inner);
+  }
+  compute();
+})();
+</script>`);
+
+const FOOTER_LINKS = [
+  ["Hono · TypeScript"],
+  ["NATS JetStream"],
+  ["SQLite"],
+  ["Coolify @ kai (Hetzner)"],
+  ["Apache 2.0"],
+] as const;
+
 export const V2Layout: FC<V2LayoutProps> = ({ title, active, userRole, csrfToken, children }) => {
   const palette = defaultPaletteItems(userRole);
   return (
@@ -181,9 +225,9 @@ export const V2Layout: FC<V2LayoutProps> = ({ title, active, userRole, csrfToken
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{title ? `${title} — agent.mesh` : "agent.mesh"}</title>
+        <title>{title ? `${title} — agent.mesh` : "agent.mesh — Paper Glass"}</title>
         {FAVICON}
-        {/* Fonts via Google CDN. Self-hosting is queued for PR #7 polish. */}
+        {/* Fonts via Google CDN. Self-hosting deferred — separate optimisation PR. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
         <link
@@ -194,40 +238,61 @@ export const V2Layout: FC<V2LayoutProps> = ({ title, active, userRole, csrfToken
         <meta name="color-scheme" content="light" />
       </head>
       <body>
-        <div class="v2-shell">
-          <header class="v2-topbar">
-            <div class="v2-brand">
-              <div class="v2-brand-mark">m</div>
-              <span class="v2-brand-name">agent.mesh</span>
-            </div>
-            <div class="v2-divider-v" />
-            <nav class="v2-nav">
-              {V2_NAV.map(([key, label, href, requiresAdmin]) => {
-                if (requiresAdmin && userRole !== "admin") return null;
-                const isActive = active === key;
-                return (
-                  <a key={key} href={href} class={isActive ? "active" : ""}>
+        <div class="v2-stage">
+          <div class="v2-scaler">
+            <div class="v2-shell">
+              <header class="v2-topbar">
+                <div class="v2-sheen" style="border-radius:14px" />
+                <div class="v2-brand">
+                  <div class="v2-brand-mark">m</div>
+                  <span class="v2-brand-name">agent.mesh</span>
+                </div>
+                <div class="v2-divider-v" />
+                <nav class="v2-nav">
+                  {V2_NAV.map(([key, label, href, requiresAdmin]) => {
+                    if (requiresAdmin && userRole !== "admin") return null;
+                    const isActive = active === key;
+                    return (
+                      <a key={key} href={href} class={isActive ? "active" : ""}>
+                        <span>{label}</span>
+                      </a>
+                    );
+                  })}
+                </nav>
+                <button data-v2-search class="v2-search-btn" type="button">
+                  <span style="color:var(--v2-text-mute)">⌕</span>
+                  <span style="flex:1;text-align:left">Search…</span>
+                  <kbd class="v2-kbd">⌘K</kbd>
+                </button>
+                {csrfToken && (
+                  <form method="post" action="/logout" style="margin-left:8px">
+                    <input type="hidden" name="csrf" value={csrfToken} />
+                    <button type="submit" class="v2-btn v2-btn--ghost" style="font-size:12px">Logout</button>
+                  </form>
+                )}
+              </header>
+              <main>{children}</main>
+              <footer class="v2-footer">
+                <div class="v2-sheen" style="border-radius:10px" />
+                <span class="v2-footer-domain">
+                  <span class="v2-footer-dot" />
+                  mesh.enki.run
+                </span>
+                {FOOTER_LINKS.map(([label]) => (
+                  <>
+                    <span class="v2-footer-sep">·</span>
                     <span>{label}</span>
-                  </a>
-                );
-              })}
-            </nav>
-            <button data-v2-search class="v2-search-btn" type="button">
-              <span style="color:var(--v2-text-mute)">⌕</span>
-              <span style="flex:1;text-align:left">Search…</span>
-              <kbd class="v2-kbd">⌘K</kbd>
-            </button>
-            {csrfToken && (
-              <form method="post" action="/logout" style="margin-left:8px">
-                <input type="hidden" name="csrf" value={csrfToken} />
-                <button type="submit" class="v2-btn v2-btn--ghost" style="font-size:12px">Logout</button>
-              </form>
-            )}
-          </header>
-          <main>{children}</main>
+                  </>
+                ))}
+                <span class="v2-footer-spacer" />
+                <span class="v2-footer-warn">NATS · single-node</span>
+              </footer>
+            </div>
+          </div>
         </div>
         {raw(paletteMarkup(palette, csrfToken))}
         {PALETTE_SCRIPT}
+        {SCALER_SCRIPT}
       </body>
     </html>
   );
