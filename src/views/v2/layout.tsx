@@ -35,10 +35,11 @@ const FAVICON = raw(
 interface PaletteItem {
   label: string;
   hint?: string;
+  desc?: string;        // Sub-line under the label (used by mcp items).
   href?: string;
   formAction?: string;
   formMethod?: "post" | "get";
-  kind: "nav" | "action" | "destructive";
+  kind: "nav" | "action" | "destructive" | "mcp";
 }
 
 // Bake in the inline palette modal: hidden by default, opened with ⌘K
@@ -46,11 +47,21 @@ interface PaletteItem {
 // vanilla JS layer handles open/close/keyboard navigation/filter.
 function paletteMarkup(items: PaletteItem[], csrfToken?: string): string {
   const rows = items.map((it, i) => {
-    const icon = it.kind === "nav" ? "→" : it.kind === "destructive" ? "✕" : "+";
+    const icon =
+      it.kind === "nav" ? "→" :
+      it.kind === "destructive" ? "✕" :
+      it.kind === "mcp" ? "⌘" : "+";
+    const iconColor = it.kind === "mcp" ? "var(--v2-accent)" : "var(--v2-text-mute)";
+    const labelColor = it.kind === "mcp" ? "var(--v2-accent)" : "var(--v2-text)";
+    const labelFamily = it.kind === "mcp" ? "var(--v2-font-mono)" : "inherit";
+    const labelWeight = it.kind === "mcp" ? "600" : "500";
     const hintC = it.kind === "destructive" ? "var(--v2-danger)" : "var(--v2-text-mute)";
+    const labelHtml =
+      `<span class="v2-pal-label" style="font-family:${labelFamily};font-weight:${labelWeight};color:${labelColor}">${escapeHtml(it.label)}</span>` +
+      (it.desc ? `<div class="v2-pal-desc">${escapeHtml(it.desc)}</div>` : "");
     const inner =
-      `<span class="v2-pal-icon">${icon}</span>` +
-      `<span class="v2-pal-label">${escapeHtml(it.label)}</span>` +
+      `<span class="v2-pal-icon" style="color:${iconColor}">${icon}</span>` +
+      `<div class="v2-pal-text">${labelHtml}</div>` +
       (it.hint ? `<span class="v2-pal-hint" style="color:${hintC}">${escapeHtml(it.hint)}</span>` : "");
     if (it.formAction) {
       const csrf = csrfToken
@@ -151,17 +162,33 @@ const PALETTE_CSS = `
 .v2-palette-list { max-height: 320px; overflow-y: auto; }
 .v2-pal-row { display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 13px; cursor: pointer; border-left: 2px solid transparent; text-decoration: none; color: inherit; background: none; border-top: none; border-right: none; border-bottom: none; width: 100%; font-family: inherit; }
 .v2-pal-btn { display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0; text-align: left; }
-.v2-pal-row.v2-pal-active { background: var(--v2-surface-2); border-left-color: var(--v2-accent); }
-.v2-pal-icon { width: 20px; height: 20px; border-radius: var(--v2-radius); background: var(--v2-surface-2); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--v2-text-mute); font-family: var(--v2-font-mono); flex-shrink: 0; }
-.v2-pal-label { flex: 1; }
-.v2-pal-hint { font-size: 11px; font-family: var(--v2-font-mono); }
+.v2-pal-row.v2-pal-active { background: linear-gradient(180deg, rgba(255,61,46,0.10), rgba(255,61,46,0.05)); border-left-color: var(--v2-accent); }
+.v2-pal-icon { width: 20px; height: 20px; border-radius: var(--v2-radius); background: var(--v2-surface-2); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-family: var(--v2-font-mono); flex-shrink: 0; }
+.v2-pal-text { flex: 1; min-width: 0; }
+.v2-pal-label { display: block; }
+.v2-pal-desc { font-size: 11px; color: var(--v2-text-mute); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-pal-hint { font-size: 11px; font-family: var(--v2-font-mono); flex-shrink: 0; }
 form.v2-pal-row { display: block; padding: 0; }
 form.v2-pal-row > .v2-pal-btn { padding: 9px 16px; }
 `;
 
+// Mesh MCP-tool reference, surfaced in the palette so agents/operators
+// can search by tool name and recall the signature without leaving the
+// dashboard. Items navigate to the agent-mesh README anchor for full docs.
+const MCP_TOOLS: ReadonlyArray<readonly [string, string, string]> = [
+  ["mesh_register", "(role, capabilities, ttl_seconds) → ok",   "Agent declares itself + capabilities for routing"],
+  ["mesh_send",     "(to, type, payload, context) → message_id", "Send to agent / broadcast / capability:* — context required"],
+  ["mesh_receive",  "(limit?) → messages[]",                     "Pull own inbox (consumer durable per agent)"],
+  ["mesh_reply",    "(reply_to, payload, context) → message_id", "Reply on existing thread — correlation_id auto"],
+  ["mesh_status",   "() → agents[] {presence, role}",            "Roster + presence (live/stale/offline/never)"],
+  ["mesh_history",  "(correlation_id, limit?) → messages[]",     "Thread by correlation_id, oldest-first"],
+];
+
+const MCP_DOC_URL = "https://github.com/enki-run/agent-mesh#mcp-tools";
+
 function defaultPaletteItems(userRole?: string): PaletteItem[] {
   const items: PaletteItem[] = [
-    { kind: "nav", label: "Go to Overview",      href: "/",              hint: "G H" },
+    { kind: "nav", label: "Go to Overview",      href: "/",              hint: "G O" },
     { kind: "nav", label: "Go to Conversations", href: "/conversations", hint: "G C" },
     { kind: "nav", label: "Go to Messages",      href: "/messages",      hint: "G M" },
     { kind: "nav", label: "Go to Activity",      href: "/activity",      hint: "G L" },
@@ -169,6 +196,9 @@ function defaultPaletteItems(userRole?: string): PaletteItem[] {
   if (userRole === "admin") {
     items.push({ kind: "nav",    label: "Go to Agents",     href: "/agents",         hint: "G A" });
     items.push({ kind: "action", label: "Register new agent…", href: "/agents?new=1", hint: "N A" });
+  }
+  for (const [name, sig, desc] of MCP_TOOLS) {
+    items.push({ kind: "mcp", label: name, desc, hint: sig, href: MCP_DOC_URL });
   }
   items.push({ kind: "destructive", label: "Log out", formAction: "/logout", formMethod: "post", hint: "destructive" });
   return items;

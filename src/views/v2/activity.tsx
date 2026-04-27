@@ -147,8 +147,8 @@ export const V2ActivityPage: FC<V2ActivityProps> = ({
                         <span style="flex:1">{name}</span>
                         <span style={`color:${V2_TOKENS.textMute};font-size:11px;font-family:${V2_TOKENS.text}`}>{n}</span>
                       </div>
-                      <div style={`height:3px;background:${V2_TOKENS.surface3}`}>
-                        <div style={`width:${(n / topMax) * 100}%;height:100%;background:${V2_TOKENS.accent}`} />
+                      <div style={`height:4px;background:linear-gradient(180deg, rgba(20,16,8,0.08), rgba(20,16,8,0.04));border-radius:999px;overflow:hidden;box-shadow:inset 0 1px 1px rgba(20,16,8,0.06)`}>
+                        <div style={`width:${(n / topMax) * 100}%;height:100%;background:var(--v2-btn-primary-bg);box-shadow:inset 0 1px 0 rgba(255,255,255,0.45);border-radius:999px`} />
                       </div>
                     </div>
                   );
