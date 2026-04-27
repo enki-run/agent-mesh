@@ -1,0 +1,78 @@
+import { describe, it, expect } from "vitest";
+import { deriveAvatarSpec, renderAvatarSvg } from "../../../src/views/v2/avatar";
+
+describe("deriveAvatarSpec", () => {
+  it("is deterministic for the same id", () => {
+    const a = deriveAvatarSpec("cloud", "dev-assistant");
+    const b = deriveAvatarSpec("cloud", "dev-assistant");
+    expect(a).toEqual(b);
+  });
+
+  it("produces different specs for different ids", () => {
+    const a = deriveAvatarSpec("cloud", "dev-assistant");
+    const b = deriveAvatarSpec("cortex", "dev-assistant");
+    // At least the variants must differ; palette pick may collide.
+    expect(a.hairVariant !== b.hairVariant ||
+           a.eyeVariant !== b.eyeVariant ||
+           a.mouthVariant !== b.mouthVariant ||
+           a.bg !== b.bg).toBe(true);
+  });
+
+  it("maps known role to its kit", () => {
+    const spec = deriveAvatarSpec("any", "security");
+    expect(spec.kit.accessory).toBe("shades");
+    expect(spec.kit.collar).toBe("suit");
+    expect(spec.shirt).toBe("#1a1612");
+  });
+
+  it("falls back via fuzzy match for unknown roles", () => {
+    const spec = deriveAvatarSpec("any", "code-reviewer");
+    // matches /dev|code|engineer/ → dev-assistant kit
+    expect(spec.kit.accessory).toBe("headset");
+    expect(spec.kit.collar).toBe("hoodie");
+  });
+
+  it("falls back to default kit when role is empty", () => {
+    const spec = deriveAvatarSpec("any", "");
+    expect(spec.kit.accessory).toBe("cap");
+    expect(spec.kit.collar).toBe("shirt");
+  });
+
+  it("variants stay in expected ranges", () => {
+    for (const id of ["a", "b", "c", "longer-id-here", "x".repeat(40)]) {
+      const s = deriveAvatarSpec(id);
+      expect(s.hairVariant).toBeGreaterThanOrEqual(0);
+      expect(s.hairVariant).toBeLessThan(8);
+      expect(s.eyeVariant).toBeGreaterThanOrEqual(0);
+      expect(s.eyeVariant).toBeLessThan(4);
+      expect(s.mouthVariant).toBeGreaterThanOrEqual(0);
+      expect(s.mouthVariant).toBeLessThan(4);
+    }
+  });
+});
+
+describe("renderAvatarSvg", () => {
+  it("returns a valid SVG string", () => {
+    const svg = renderAvatarSvg("cloud", "dev-assistant");
+    expect(svg).toMatch(/^<svg /);
+    expect(svg).toContain('viewBox="0 0 32 32"');
+    expect(svg).toContain("</svg>");
+  });
+
+  it("respects custom size", () => {
+    expect(renderAvatarSvg("x", "any", { size: 64 })).toContain('width="64"');
+  });
+
+  it("emits clip-path when rounded", () => {
+    expect(renderAvatarSvg("x", "any", { rounded: true })).toContain('clip-path="url(#r)"');
+  });
+
+  it("includes shape-rendering=crispEdges for pixel-art look", () => {
+    expect(renderAvatarSvg("x")).toContain('shape-rendering="crispEdges"');
+  });
+
+  it("is byte-identical for the same input", () => {
+    expect(renderAvatarSvg("crtx-local", "cortex-local"))
+      .toBe(renderAvatarSvg("crtx-local", "cortex-local"));
+  });
+});
