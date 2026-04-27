@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveAvatarSpec, renderAvatarSvg } from "../../../src/views/v2/avatar";
+import { deriveAvatarSpec, renderAvatarSvg, renderAvatarSvgInner } from "../../../src/views/v2/avatar";
 
 describe("deriveAvatarSpec", () => {
   it("is deterministic for the same id", () => {
@@ -74,5 +74,25 @@ describe("renderAvatarSvg", () => {
   it("is byte-identical for the same input", () => {
     expect(renderAvatarSvg("crtx-local", "cortex-local"))
       .toBe(renderAvatarSvg("crtx-local", "cortex-local"));
+  });
+});
+
+describe("renderAvatarSvgInner", () => {
+  it("returns rect markup with no <svg> wrapper (embeddable)", () => {
+    const inner = renderAvatarSvgInner("cloud", "dev-assistant");
+    expect(inner).toContain("<rect ");
+    expect(inner).not.toContain("<svg");
+    expect(inner).not.toContain("</svg>");
+  });
+
+  it("matches the inner content of renderAvatarSvg", () => {
+    const full = renderAvatarSvg("cloud", "dev-assistant");
+    const inner = renderAvatarSvgInner("cloud", "dev-assistant");
+    expect(full).toContain(inner);
+  });
+
+  it("is deterministic", () => {
+    expect(renderAvatarSvgInner("crtx-local", "cortex-local"))
+      .toBe(renderAvatarSvgInner("crtx-local", "cortex-local"));
   });
 });

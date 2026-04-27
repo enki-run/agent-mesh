@@ -341,13 +341,14 @@ export interface AvatarRenderOptions {
   ringColor?: string;  // optional 1.5px outline ring
 }
 
-export function renderAvatarSvg(
-  agentId: string,
-  role?: string,
-  opts: AvatarRenderOptions = {}
-): string {
+/**
+ * Render the avatar's pixel-art rectangles in the 0–32 coordinate space,
+ * without any wrapping <svg> tag. Useful for embedding the avatar inside
+ * another SVG (e.g. the mesh-topology nodes) via:
+ *   `<g transform="translate(cx - N/2, cy - N/2) scale(N/32)">{inner}</g>`
+ */
+export function renderAvatarSvgInner(agentId: string, role?: string): string {
   const spec = deriveAvatarSpec(agentId, role);
-  const size = opts.size ?? 32;
   const rects: Rect[] = [];
 
   // Background + bottom shading
@@ -361,11 +362,10 @@ export function renderAvatarSvg(
   rects.push(rect(14, 22, 5, 3, spec.skin[1]));
   rects.push(rect(14, 25, 5, 1, darken(spec.skin[1], 0.7)));
 
-  // Head (round corners by skipping corner pixels: 11/10, 21/10, 11/22, 21/22)
-  // Done as 4 rects to avoid corner overlap.
-  rects.push(rect(12, 10, 9, 1, spec.skin[0]));   // top row
-  rects.push(rect(11, 11, 11, 11, spec.skin[0])); // body
-  rects.push(rect(12, 22, 9, 1, spec.skin[0]));   // bottom row
+  // Head — 3 rects so the corners stay clipped at the rounded silhouette.
+  rects.push(rect(12, 10, 9, 1, spec.skin[0]));
+  rects.push(rect(11, 11, 11, 11, spec.skin[0]));
+  rects.push(rect(12, 22, 9, 1, spec.skin[0]));
 
   // Ears
   rects.push(rect(10, 16, 1, 3, spec.skin[1]));
@@ -380,6 +380,17 @@ export function renderAvatarSvg(
   drawEyes(rects, spec.eyeVariant);
   drawMouth(rects, spec.mouthVariant);
   drawAccessory(rects, spec.kit.accessory);
+
+  return rects.join("");
+}
+
+export function renderAvatarSvg(
+  agentId: string,
+  role?: string,
+  opts: AvatarRenderOptions = {}
+): string {
+  const size = opts.size ?? 32;
+  const inner = renderAvatarSvgInner(agentId, role);
 
   const ringAttr = opts.ringColor
     ? ` style="filter:drop-shadow(0 0 0 ${opts.ringColor})"`
@@ -396,7 +407,7 @@ export function renderAvatarSvg(
     `<svg xmlns="http://www.w3.org/2000/svg" ` +
     `viewBox="0 0 32 32" width="${size}" height="${size}" ` +
     `shape-rendering="crispEdges"${ringAttr}>` +
-    clip + rects.join("") + clipEnd +
+    clip + inner + clipEnd +
     `</svg>`
   );
 }
