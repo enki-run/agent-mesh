@@ -65,17 +65,29 @@ const TokenSuccessPanel: FC<{ newToken: string }> = ({ newToken }) => (
   "url": "https://mesh.enki.run/mcp",
   "headers": { "Authorization": "Bearer ${newToken}" }
 }`}</pre>
-          <div style={`font-size:11px;font-weight:600;margin:10px 0 4px;color:${V2_TOKENS.textDim}`}>mesh-cli</div>
+          <div style={`font-size:11px;font-weight:600;margin:10px 0 4px;color:${V2_TOKENS.textDim}`}>Claude Desktop · OAuth 2.1 + PKCE</div>
+          <pre style={`font-family:${V2_TOKENS.text};font-size:11px;background:${V2_TOKENS.surface2};padding:10px 12px;border-radius:${V2_TOKENS.radius}px;border:1px solid ${V2_TOKENS.line};overflow-x:auto;margin:0;white-space:pre`}>{`"mesh": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "https://mesh.enki.run/mcp"]
+}
+// Browser-OAuth-Flow → Bearer-Token im Browser eingeben`}</pre>
+          <div style={`font-size:11px;font-weight:600;margin:10px 0 4px;color:${V2_TOKENS.textDim}`}>mesh-cli (Go binary)</div>
           <pre style={`font-family:${V2_TOKENS.text};font-size:11px;background:${V2_TOKENS.surface2};padding:10px 12px;border-radius:${V2_TOKENS.radius}px;border:1px solid ${V2_TOKENS.line};overflow-x:auto;margin:0;white-space:pre`}>{`export MESH_TOKEN="${newToken}"
 ./mesh-cli status`}</pre>
+          <div style={`font-size:11px;color:${V2_TOKENS.textMute};margin-top:10px;font-family:${V2_TOKENS.text}`}>
+            Bearer token shown once · stored as SHA-256 hash · `from` is set server-side.
+          </div>
         </div>
       </details>
     </div>
   </V2Card>
 );
 
+// Dashboard registration only persists name + auto-token. Role,
+// capabilities and TTL flow in via mesh_register from the agent itself
+// — that's why those fields aren't in this form.
 const NewAgentForm: FC<{ csrfToken: string }> = ({ csrfToken }) => (
-  <V2Card title="Register new agent" sub="POST /agents/create"
+  <V2Card title="Register new agent" sub="POST /agents/create · agent then calls mesh_register"
     right={<V2Btn href="/agents" kind="ghost">× cancel</V2Btn>}>
     <form method="post" action="/agents/create" style="padding:18px 22px">
       <input type="hidden" name="csrf" value={csrfToken} />
@@ -92,10 +104,11 @@ const NewAgentForm: FC<{ csrfToken: string }> = ({ csrfToken }) => (
           </div>
         </div>
       </div>
+      <div style={`font-size:11.5px;color:${V2_TOKENS.textMute};margin-bottom:14px;font-family:${V2_TOKENS.text};line-height:1.6`}>
+        Role · capabilities · TTL · auth come from <strong style={`color:${V2_TOKENS.text}`}>mesh_register</strong> when the
+        agent first connects. Bearer-token shown once · stored as SHA-256 hash · <code>from</code> is set server-side.
+      </div>
       <div style="display:flex;align-items:center;gap:10px">
-        <span style={`font-size:11.5px;color:${V2_TOKENS.textMute};font-family:${V2_TOKENS.text}`}>
-          Token will be shown once after registration.
-        </span>
         <div style="flex:1" />
         <V2Btn kind="primary" type="submit">Register agent</V2Btn>
       </div>
@@ -131,17 +144,25 @@ const InspectPanel: FC<{ agent: V2AgentsAgent | null; csrfToken: string }> = ({ 
             <div style={`font-size:11.5px;color:${V2_TOKENS.textDim};font-family:${V2_TOKENS.text}`}>{agent.id}</div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:90px 1fr;row-gap:7px;font-size:12.5px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:110px 1fr;row-gap:7px;font-size:12.5px;margin-bottom:16px">
           <span style={`color:${V2_TOKENS.textMute}`}>Token</span>
           <span><V2Tag color={tokenColor}>{tokenLabel}</V2Tag></span>
           <span style={`color:${V2_TOKENS.textMute}`}>Role</span>
           <span>{agent.role ?? "—"}</span>
+          <span style={`color:${V2_TOKENS.textMute}`}>Consumer</span>
+          <span style={`font-family:${V2_TOKENS.text};font-size:11.5px`}>mesh.agents.{agent.name.toLowerCase()}.inbox</span>
+          <span style={`color:${V2_TOKENS.textMute}`}>Capabilities</span>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            {agent.capabilities.length > 0 ? agent.capabilities.map((c) => (
+              <span style={`font-size:10.5px;padding:1px 7px;border-radius:999px;background:${withAlpha(V2_TOKENS.text, 0.06)};color:${V2_TOKENS.textDim};font-family:${V2_TOKENS.text}`}>{c}</span>
+            )) : <span style={`color:${V2_TOKENS.textMute}`}>—</span>}
+          </div>
+          <span style={`color:${V2_TOKENS.textMute}`}>TTL</span>
+          <span style={`font-family:${V2_TOKENS.text};font-size:12px`}>86 400 s · 24 h</span>
           <span style={`color:${V2_TOKENS.textMute}`}>Created</span>
           <span style={`font-family:${V2_TOKENS.text};font-size:12px`}>{fmtCreated(agent.created_at)}</span>
           <span style={`color:${V2_TOKENS.textMute}`}>Last seen</span>
           <span style={`font-family:${V2_TOKENS.text};font-size:12px`}>{fmtRel(agent.last_seen_at)}</span>
-          <span style={`color:${V2_TOKENS.textMute}`}>Capabilities</span>
-          <span>{agent.capabilities.length > 0 ? agent.capabilities.join(", ") : "—"}</span>
         </div>
         <div style="margin-bottom:16px">
           <div style={`font-size:10.5px;color:${V2_TOKENS.textMute};margin-bottom:6px;letter-spacing:0.1em;text-transform:uppercase`}>Activity · 24h</div>
@@ -225,10 +246,11 @@ export const V2AgentsPage: FC<V2AgentsProps> = ({
                 <FilterChip active={false} href="/agents?presence=off">Off ({off})</FilterChip>
               </div>
             }>
-            <div style={`display:grid;grid-template-columns:24px 1.6fr 1fr 70px 90px 100px 80px;padding:9px 14px;font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.08em;text-transform:uppercase;border-bottom:1px solid ${V2_TOKENS.line};gap:12px`}>
+            <div style={`display:grid;grid-template-columns:24px 1.4fr 0.8fr 1.3fr 60px 80px 80px 70px;padding:9px 14px;font-size:10.5px;color:${V2_TOKENS.textMute};letter-spacing:0.08em;text-transform:uppercase;border-bottom:1px solid ${V2_TOKENS.line};gap:12px`}>
               <span></span>
               <span>Name</span>
               <span>Role</span>
+              <span>Capabilities</span>
               <span style="text-align:right">24h</span>
               <span>Activity</span>
               <span>Last seen</span>
@@ -238,15 +260,26 @@ export const V2AgentsPage: FC<V2AgentsProps> = ({
               const selected = inspected?.id === a.id;
               return (
                 <a href={`/agents?inspect=${a.id}`}
-                  style={`display:grid;grid-template-columns:24px 1.6fr 1fr 70px 90px 100px 80px;padding:10px 14px;align-items:center;gap:12px;font-size:13px;${i < agents.length - 1 ? `border-bottom:1px solid ${V2_TOKENS.line};` : ""}background:${selected ? withAlpha(V2_TOKENS.accent, 0.06) : "transparent"};border-left:2px solid ${selected ? V2_TOKENS.accent : "transparent"};text-decoration:none;color:inherit`}>
+                  style={`display:grid;grid-template-columns:24px 1.4fr 0.8fr 1.3fr 60px 80px 80px 70px;padding:10px 14px;align-items:center;gap:12px;font-size:13px;${i < agents.length - 1 ? `border-bottom:1px solid ${V2_TOKENS.line};` : ""}background:${selected ? `linear-gradient(180deg, ${withAlpha(V2_TOKENS.accent, 0.10)}, ${withAlpha(V2_TOKENS.accent, 0.04)})` : "transparent"};border-left:2px solid ${selected ? V2_TOKENS.accent : "transparent"};text-decoration:none;color:inherit`}>
                   <V2Avatar agentId={a.id} role={a.role ?? undefined} size={22} />
                   <div style="display:flex;align-items:center;gap:8px">
                     <span style={`font-weight:600;color:${a.is_active ? V2_TOKENS.text : V2_TOKENS.textMute}`}>{a.name}</span>
                     <V2Dot presence={a.presence} size={6} />
                   </div>
                   <span style={`color:${V2_TOKENS.textDim};font-size:12px;font-family:${V2_TOKENS.text}`}>{a.role ?? "—"}</span>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;overflow:hidden">
+                    {a.capabilities.slice(0, 3).map((c) => (
+                      <span style={`font-size:10px;padding:1px 6px;border-radius:999px;background:${withAlpha(V2_TOKENS.text, 0.05)};color:${V2_TOKENS.textDim};font-family:${V2_TOKENS.text}`}>{c}</span>
+                    ))}
+                    {a.capabilities.length > 3 && (
+                      <span style={`font-size:10px;color:${V2_TOKENS.textMute};font-family:${V2_TOKENS.text}`}>+{a.capabilities.length - 3}</span>
+                    )}
+                    {a.capabilities.length === 0 && (
+                      <span style={`font-size:11px;color:${V2_TOKENS.textMute}`}>—</span>
+                    )}
+                  </div>
                   <span style={`text-align:right;font-variant-numeric:tabular-nums;font-family:${V2_TOKENS.text};color:${a.msg24 > 0 ? V2_TOKENS.text : V2_TOKENS.textMute}`}>{a.msg24}</span>
-                  <V2Spark data={a.heat} w={80} h={18} stroke={a.msg24 > 0 ? V2_TOKENS.accent : V2_TOKENS.textMute} />
+                  <V2Spark data={a.heat} w={70} h={18} stroke={a.msg24 > 0 ? V2_TOKENS.accent : V2_TOKENS.textMute} />
                   <span style={`color:${V2_TOKENS.textMute};font-size:11.5px;font-family:${V2_TOKENS.text}`}>{fmtRel(a.last_seen_at)}</span>
                   <div style="text-align:right">
                     <V2Tag color={a.is_active ? V2_TOKENS.accent2 : V2_TOKENS.textMute}>
