@@ -25,13 +25,15 @@ import { loadConfig, isConfigError } from "./config.js";
 import { log } from "./services/logger.js";
 import { listMessages, listConversations } from "./services/message-queries.js";
 import { setFlash, getFlash } from "./services/flash.js";
-import { getHomeStats } from "./services/home-stats.js";
 import { checkHealth } from "./services/health.js";
 import { PresenceService } from "./services/presence.js";
+import { loadV2HomeData } from "./services/v2-home-data.js";
+import { subscribeMessageEvents } from "./services/message-events.js";
+import { streamSSE } from "hono/streaming";
 
 // --- Views ---
 import { LoginPage } from "./views/login.js";
-import { HomePage } from "./views/home.js";
+import { V2HomePage } from "./views/v2/home.js";
 import { AgentsPage } from "./views/agents.js";
 import { MessagesPage } from "./views/messages.js";
 import { ActivityPage } from "./views/activity.js";
@@ -305,59 +307,39 @@ function cookieSecretFor(env: Env): string {
   return getCookieSecret(env as unknown as Record<string, string | undefined>);
 }
 
-// --- Dashboard: Home ---
+// --- Dashboard: Home (v2) ---
 app.get("/", async (c) => {
   const agent = c.get("agent");
   const csrfToken = generateCsrfToken(cookieSecretFor(c.env));
-
-  const [stats, presenceEntries] = await Promise.all([
-    getHomeStats(db, presence),
-    presence.list(),
-  ]);
-  const activityResult = activity.list({ limit: 5, offset: 0 });
-
-  // Decorate each agent with its computed presence state so the view
-  // renders "live" vs "stale/offline/never" consistently with mesh_status.
-  const agentsForView = presenceEntries.map((e) => ({
-    ...e.agent,
-    presence: e.presence,
-    role: e.liveMeta?.role ?? e.agent.role,
-    working_on: e.liveMeta?.working_on ?? e.agent.working_on,
-    last_seen_at: e.effectiveLastSeen,
-  }));
-
+  const data = await loadV2HomeData({ db, presence, activity });
   return c.html(
-    <HomePage
-      stats={stats}
-      activities={activityResult.data}
-      agents={agentsForView}
-      userRole={agent?.role ?? undefined}
-      csrfToken={csrfToken}
-      agentAvatars={Object.fromEntries(agentsForView.filter(a => a.avatar).map(a => [a.name, a.avatar!]))}
-    />,
+    <V2HomePage {...data} userRole={agent?.role ?? undefined} csrfToken={csrfToken} />,
   );
 });
 
-// --- Dashboard: Home JSON (for polling) ---
-app.get("/api/home", async (c) => {
-  const [stats, presenceEntries] = await Promise.all([
-    getHomeStats(db, presence),
-    presence.list(),
-  ]);
-  const activityResult = activity.list({ limit: 5, offset: 0 });
-
-  return c.json({
-    stats,
-    agents: presenceEntries.map((e) => ({
-      name: e.agent.name,
-      role: e.liveMeta?.role ?? e.agent.role,
-      avatar: e.agent.avatar,
-      working_on: e.liveMeta?.working_on ?? e.agent.working_on,
-      last_seen_at: e.effectiveLastSeen,
-      is_active: e.agent.is_active,
-      presence: e.presence,
-    })),
-    activities: activityResult.data,
+// --- SSE: live thread updates ---
+// Subscribes to in-process message events and forwards messages with the
+// matching correlation_id to the connected dashboard. EventSource auto-
+// reconnects on network drops; auth piggy-backs on the session cookie.
+app.get("/sse/threads/:correlation_id", (c) => {
+  const correlationId = c.req.param("correlation_id");
+  return streamSSE(c, async (stream) => {
+    const unsubscribe = subscribeMessageEvents((msg) => {
+      const tid = msg.correlation_id ?? msg.id;
+      if (tid !== correlationId) return;
+      stream.writeSSE({
+        data: JSON.stringify({
+          id: msg.id, from: msg.from, payload: msg.payload, created_at: msg.created_at,
+        }),
+      }).catch(() => { /* connection closed */ });
+    });
+    stream.onAbort(() => unsubscribe());
+    // Heartbeat every 25s keeps proxies from killing idle SSE connections.
+    while (!stream.aborted) {
+      await stream.sleep(25_000);
+      await stream.writeSSE({ event: "ping", data: "" }).catch(() => {});
+    }
+    unsubscribe();
   });
 });
 
