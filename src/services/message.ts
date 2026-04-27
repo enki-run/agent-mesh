@@ -1,5 +1,6 @@
 import { ulid } from "ulidx";
 import type Database from "better-sqlite3";
+import { publishMessageEvent } from "./message-events.js";
 import type { Message, MessagePriority } from "../types";
 import { MAX_PAYLOAD_BYTES, MAX_CONTEXT_LENGTH, DEFAULT_TTL_SECONDS } from "../types";
 import { log } from "./logger.js";
@@ -175,6 +176,11 @@ export async function sendAndPersistMessage(
     });
     return { delivered: true, persisted: false };
   }
+
+  // 3. Notify in-process subscribers (v2 dashboard SSE). Best-effort —
+  // listener failures are swallowed inside publishMessageEvent so they
+  // can never affect the send result.
+  publishMessageEvent(msg);
 
   return { delivered: true, persisted: true };
 }

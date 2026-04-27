@@ -81,3 +81,34 @@ export function getIncidents24h(
     .get(since) as { count: number };
   return row.count;
 }
+
+/** Total distinct conversation threads (a thread is messages sharing a
+ *  correlation_id, or a single message if it has no correlation_id). */
+export function getThreadsCount(db: Database.Database): number {
+  const row = db
+    .prepare(
+      "SELECT COUNT(*) AS count FROM (SELECT DISTINCT COALESCE(correlation_id, id) FROM messages)",
+    )
+    .get() as { count: number };
+  return row.count;
+}
+
+/** 24h message count per agent (sender or receiver), keyed by agent name. */
+export function getAgentMsgCounts24h(
+  db: Database.Database,
+  now: Date = new Date(),
+): Map<string, number> {
+  const since = new Date(now.getTime() - MS_PER_DAY).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT agent, COUNT(*) AS count FROM (
+         SELECT from_agent AS agent FROM messages WHERE created_at > ?
+         UNION ALL
+         SELECT to_agent   AS agent FROM messages WHERE created_at > ?
+       ) GROUP BY agent COLLATE NOCASE`,
+    )
+    .all(since, since) as Array<{ agent: string; count: number }>;
+  const out = new Map<string, number>();
+  for (const r of rows) out.set(r.agent.toLowerCase(), r.count);
+  return out;
+}
